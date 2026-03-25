@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.*?>
+<?import javafx.geometry.Insets?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.quietpages.quietpages.controller.OnlineBooksController"
+            styleClass="library-root">
+
+    <!-- TOP TOOLBAR -->
+    <top>
+        <HBox styleClass="ob-toolbar" alignment="CENTER_LEFT" spacing="0">
+
+            <!-- LEFT: Add + Downloads + Info -->
+            <Button fx:id="btnAddSite" styleClass="toolbar-icon-btn" onAction="#onAddSite">
+                <graphic><FontIcon iconLiteral="fas-plus" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Add site"/></tooltip>
+            </Button>
+            <Button fx:id="btnDownloads" styleClass="toolbar-icon-btn" onAction="#onDownloads">
+                <graphic><FontIcon iconLiteral="fas-download" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Downloads"/></tooltip>
+            </Button>
+            <Button fx:id="btnInfo" styleClass="toolbar-icon-btn" onAction="#onInfo">
+                <graphic><FontIcon iconLiteral="fas-info-circle" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Info"/></tooltip>
+            </Button>
+
+            <Region HBox.hgrow="ALWAYS"/>
+
+            <!-- RIGHT: Home + Refresh + Back + Forward -->
+            <Button fx:id="btnHome" styleClass="toolbar-icon-btn" onAction="#onHome">
+                <graphic><FontIcon iconLiteral="fas-home" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Go to site home"/></tooltip>
+            </Button>
+            <Button fx:id="btnRefresh" styleClass="toolbar-icon-btn" onAction="#onRefresh">
+                <graphic><FontIcon iconLiteral="fas-sync-alt" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Refresh"/></tooltip>
+            </Button>
+            <Button fx:id="btnBack" styleClass="toolbar-icon-btn" onAction="#onBack">
+                <graphic><FontIcon iconLiteral="fas-arrow-left" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Back"/></tooltip>
+            </Button>
+            <Button fx:id="btnForward" styleClass="toolbar-icon-btn" onAction="#onForward">
+                <graphic><FontIcon iconLiteral="fas-arrow-right" iconSize="16"/></graphic>
+                <tooltip><Tooltip text="Forward"/></tooltip>
+            </Button>
+
+        </HBox>
+    </top>
+
+    <!-- BODY -->
+    <center>
+        <HBox>
+
+            <!-- Left sidebar: site list -->
+            <VBox styleClass="ob-sidebar" minWidth="340" maxWidth="340">
+                <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS"
+                            styleClass="book-scroll-pane">
+                    <content>
+                        <VBox fx:id="siteListVBox" styleClass="ob-site-list"/>
+                    </content>
+                </ScrollPane>
+            </VBox>
+
+            <Separator orientation="VERTICAL" styleClass="ob-divider"/>
+
+            <!-- Right: WebView area + Downloads overlay -->
+            <StackPane fx:id="webContainer" HBox.hgrow="ALWAYS" alignment="TOP_RIGHT">
+
+                <Label fx:id="lblSelectSite"
+                       text="Select the site to start downloading eBooks"
+                       styleClass="ob-placeholder"
+                       StackPane.alignment="CENTER"/>
+
+                <!-- Downloads dropdown panel (top-right corner) -->
+                <VBox fx:id="downloadsPanel" styleClass="ob-downloads-panel"
+                      maxWidth="340"
+                      visible="false" managed="false"
+                      StackPane.alignment="TOP_LEFT">
+                    <padding><Insets top="10" right="12" bottom="10" left="12"/></padding>
+
+                    <Label fx:id="lblNoDownloads"
+                           text="Find your downloads here."
+                           styleClass="ob-no-downloads"/>
+
+                    <VBox fx:id="downloadsListVBox" spacing="8"/>
+
+                </VBox>
+
+            </StackPane>
+
+        </HBox>
+    </center>
+
+</BorderPane>

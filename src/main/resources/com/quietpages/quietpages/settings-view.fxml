@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<ScrollPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.quietpages.quietpages.controller.SettingsController"
+            fitToWidth="true"
+            fitToHeight="true"
+            styleClass="library-root book-scroll-pane">
+
+    <content>
+        <VBox spacing="40"
+          styleClass="library-root"
+          fillWidth="true"
+          maxWidth="Infinity"
+           prefHeight="Infinity">
+            <padding>
+                <Insets top="32" right="32" bottom="32" left="32"/>
+            </padding>
+
+            <!-- Appearance -->
+            <VBox spacing="12">
+                <Label text="Appearance"
+                       style="-fx-text-fill:-qp-text-primary;-fx-font-size:18px;-fx-font-weight:bold;"/>
+
+                <Label text="Choose a theme for the entire application."
+                       style="-fx-text-fill:-qp-text-secondary;-fx-font-size:13px;"/>
+
+                <FlowPane fx:id="themesPane"
+                   hgap="16"
+                   vgap="16"
+                 prefWrapLength="1000">
+
+                    <!-- LIGHT -->
+                    <VBox fx:id="btnLight" styleClass="theme-card" onMouseClicked="#onLight">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#ffffff;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#dddddd;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#aaaaaa;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Light" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- DARK -->
+                    <VBox fx:id="btnDark" styleClass="theme-card" onMouseClicked="#onDark">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#2B2B2B;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#1F1F1F;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#3A3A3A;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Dark" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- OCEAN -->
+                    <VBox fx:id="btnOcean" styleClass="theme-card" onMouseClicked="#onOcean">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#0D1B2A;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#1A2E45;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#2196F3;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Ocean" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- SUNSET -->
+                    <VBox fx:id="btnSunset" styleClass="theme-card" onMouseClicked="#onSunset">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#1A0A00;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#2E1A08;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#FF6B35;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Sunset" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- FOREST -->
+                    <VBox fx:id="btnForest" styleClass="theme-card" onMouseClicked="#onForest">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#0A1A0A;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#162816;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#4CAF50;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Forest" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- LAVENDER -->
+                    <VBox fx:id="btnLavender" styleClass="theme-card" onMouseClicked="#onLavender">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#1A1020;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#2A1E35;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#9C27B0;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Lavender" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- ROSE -->
+                    <VBox fx:id="btnRose" styleClass="theme-card" onMouseClicked="#onRose">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#1A0A10;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#2E1520;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#E91E63;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Rose" styleClass="theme-label"/>
+                    </VBox>
+
+                    <!-- MIDNIGHT -->
+                    <VBox fx:id="btnMidnight" styleClass="theme-card" onMouseClicked="#onMidnight">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color:#050510;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#0D0D25;" styleClass="theme-color"/>
+                            <Region style="-fx-background-color:#3F51B5;" styleClass="theme-color"/>
+                        </HBox>
+                        <Label text="Midnight" styleClass="theme-label"/>
+                    
+                    </VBox>
+
+                </FlowPane>
+                <Region VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+           
+
+        </VBox>
+    </content>
+</ScrollPane>

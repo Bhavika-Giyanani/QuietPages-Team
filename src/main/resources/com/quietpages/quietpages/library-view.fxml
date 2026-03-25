@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.*?>
+<?import javafx.geometry.Insets?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.quietpages.quietpages.controller.LibraryController"
+            styleClass="library-root">
+
+    <!-- TOP TOOLBAR -->
+    <top>
+        <VBox styleClass="toolbar-container">
+
+            <!-- Row 1: Filter + icon buttons -->
+            <HBox styleClass="toolbar-row" alignment="CENTER_LEFT" spacing="4">
+
+                <Button fx:id="btnFilter" styleClass="filter-btn"
+                        onAction="#onFilterClicked" minWidth="140" maxWidth="140">
+                    <graphic>
+                        <HBox alignment="CENTER_LEFT" spacing="6">
+                            <Label fx:id="currentFilterLabel" text="All Books"
+                                   styleClass="filter-label"/>
+                            <FontIcon iconLiteral="fas-chevron-down" iconSize="11"
+                                      styleClass="filter-chevron"/>
+                        </HBox>
+                    </graphic>
+                </Button>
+
+                <Region HBox.hgrow="ALWAYS"/>
+
+                <Button fx:id="btnSearch" styleClass="toolbar-icon-btn"
+                        onAction="#onSearchClicked">
+                    <graphic><FontIcon iconLiteral="fas-search" iconSize="16"/></graphic>
+                    <tooltip><Tooltip text="Search"/></tooltip>
+                </Button>
+
+                <Button fx:id="btnGroup" styleClass="toolbar-icon-btn"
+                        onAction="#onGroupClicked">
+                    <graphic><FontIcon iconLiteral="fas-layer-group" iconSize="16"/></graphic>
+                    <tooltip><Tooltip text="Group by"/></tooltip>
+                </Button>
+
+                <Button fx:id="btnSort" styleClass="toolbar-icon-btn"
+                        onAction="#onSortClicked">
+                    <graphic><FontIcon iconLiteral="fas-sort-amount-down" iconSize="16"/></graphic>
+                    <tooltip><Tooltip text="Sort by"/></tooltip>
+                </Button>
+
+                <Button fx:id="btnAdd" styleClass="toolbar-icon-btn"
+                        onAction="#onAddClicked">
+                    <graphic><FontIcon iconLiteral="fas-plus" iconSize="16"/></graphic>
+                    <tooltip><Tooltip text="Add books"/></tooltip>
+                </Button>
+
+                <Button fx:id="btnMultiSelect" styleClass="toolbar-icon-btn"
+                        onAction="#onMultiSelectClicked">
+                    <graphic><FontIcon iconLiteral="fas-check-square" iconSize="16"/></graphic>
+                    <tooltip><Tooltip text="Select multiple"/></tooltip>
+                </Button>
+
+            </HBox>
+
+            <!-- Row 2: Multi-select bar (hidden by default) -->
+            <HBox fx:id="multiSelectBar" styleClass="multiselect-bar"
+                  alignment="CENTER_LEFT" spacing="8"
+                  visible="false" managed="false">
+                <padding><Insets top="4" right="10" bottom="4" left="10"/></padding>
+                <Label text="Select all" styleClass="select-all-label"
+                       onMouseClicked="#onSelectAll"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="btnDeleteSelected" styleClass="delete-btn"
+                        onAction="#onDeleteSelected">
+                    <graphic><FontIcon iconLiteral="fas-trash" iconSize="14"/></graphic>
+                    <tooltip><Tooltip text="Delete selected"/></tooltip>
+                </Button>
+            </HBox>
+
+            <!-- Row 3: Search bar (hidden by default) -->
+            <HBox fx:id="searchBar" styleClass="search-bar-row"
+                  alignment="CENTER_LEFT" spacing="6"
+                  visible="false" managed="false">
+                <padding><Insets top="6" right="10" bottom="6" left="10"/></padding>
+                <TextField fx:id="searchField" styleClass="search-field"
+                           promptText="Search books..."
+                           HBox.hgrow="ALWAYS"/>
+                <Button fx:id="btnSearchClear" styleClass="search-clear-btn"
+                        onAction="#onSearchClear">
+                    <graphic><FontIcon iconLiteral="fas-times" iconSize="14"/></graphic>
+                </Button>
+            </HBox>
+
+        </VBox>
+    </top>
+
+    <!-- MAIN CONTENT -->
+    <center>
+        <HBox>
+
+            <!-- Scrollable book grid -->
+            <ScrollPane fx:id="scrollPane" styleClass="book-scroll-pane"
+                        fitToWidth="true" HBox.hgrow="ALWAYS">
+                <content>
+                    <VBox fx:id="contentVBox" styleClass="content-vbox"/>
+                </content>
+            </ScrollPane>
+
+            <!-- Book Info side panel (hidden until a book is clicked) -->
+            <VBox fx:id="bookInfoPanel" styleClass="book-info-panel"
+                  minWidth="300" maxWidth="340" spacing="6"
+                  visible="false" managed="false">
+                <padding><Insets top="16" right="12" bottom="8" left="12"/></padding>
+
+                <ImageView fx:id="infoCoverImage"
+                           fitWidth="170" fitHeight="230"
+                           preserveRatio="true"/>
+
+                <Label fx:id="infoTitle"   styleClass="info-book-title" wrapText="true"/>
+                <Label fx:id="infoAuthor"  styleClass="info-book-author" wrapText="true"/>
+
+                <Region prefHeight="6"/>
+
+                <Label fx:id="infoProgressText" styleClass="info-field"/>
+                <Label fx:id="infoDateAdded"    styleClass="info-field"/>
+                <Label fx:id="infoLastRead"     styleClass="info-field"/>
+                <Label fx:id="infoWordCount"    styleClass="info-field"/>
+                <Label fx:id="infoLineCount"    styleClass="info-field"/>
+                <Label fx:id="infoDescription"  styleClass="info-field" wrapText="true"/>
+                <Label fx:id="infoSeries"       styleClass="info-field"/>
+                <Label fx:id="infoLanguage"     styleClass="info-field"/>
+                <Label fx:id="infoPublisher"    styleClass="info-field"/>
+                <Label fx:id="infoGenre"        styleClass="info-field"/>
+                <Label fx:id="infoFilePath"     styleClass="info-field info-filepath"
+                       wrapText="true"/>
+
+                <Region VBox.vgrow="ALWAYS"/>
+
+                <HBox spacing="6" styleClass="info-btn-row">
+                    <Button fx:id="btnInfoOpenBook" text="Open Book"
+                            styleClass="info-action-btn" onAction="#onInfoOpenBook"
+                            HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                    <Button fx:id="btnInfoEditBookInfo" text="Edit Book Info"
+                            styleClass="info-action-btn" onAction="#onInfoEditBookInfo"
+                            HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                    <Button fx:id="btnInfoClose" text="Close"
+                            styleClass="info-action-btn" onAction="#onInfoClose"/>
+                </HBox>
+
+            </VBox>
+
+        </HBox>
+    </center>
+
+</BorderPane>

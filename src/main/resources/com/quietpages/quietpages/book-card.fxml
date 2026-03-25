@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.*?>
+<?import javafx.scene.shape.*?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<VBox xmlns="http://javafx.com/javafx/21"
+    xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.quietpages.quietpages.controller.BookCardController" fx:id="rootCard" styleClass="book-card" alignment="TOP_CENTER" spacing="6" maxWidth="140" minWidth="140">
+
+    <!-- Cover area with selection overlay -->
+    <StackPane fx:id="coverPane" styleClass="cover-pane" prefWidth="130" prefHeight="190" minWidth="130" minHeight="190">
+
+        <!-- Cover image -->
+        <ImageView fx:id="coverImage" fitWidth="130" fitHeight="190" preserveRatio="false" smooth="true"/>
+
+        <!-- Blue check overlay (shown in multi-select when selected) -->
+        <StackPane fx:id="checkOverlay" styleClass="check-overlay" alignment="TOP_RIGHT">
+            <Rectangle width="130" height="190" styleClass="check-overlay-bg"/>
+            <StackPane alignment="TOP_RIGHT">
+                <Rectangle width="26" height="26" styleClass="check-tick-bg" arcWidth="4" arcHeight="4"/>
+                <FontIcon iconLiteral="fas-check" iconSize="13" styleClass="check-tick-icon"/>
+            </StackPane>
+        </StackPane>
+
+        <!-- Blue border when selected -->
+        <Rectangle fx:id="selectionBorder" width="130" height="190" styleClass="selection-border" arcWidth="4" arcHeight="4" fill="transparent"/>
+
+    </StackPane>
+
+    <!-- Book title -->
+    <Label fx:id="titleLabel" styleClass="book-card-title" wrapText="false" maxWidth="130" alignment="CENTER"/>
+
+</VBox>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<ScrollPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.quietpages.quietpages.controller.HomeController"
+            fitToWidth="true"
+            fitToHeight="true"
+            hbarPolicy="NEVER"
+            styleClass="library-root book-scroll-pane">
+
+    <content>
+        <VBox spacing="30"
+              styleClass="library-root"
+              fillWidth="true"
+              prefHeight="Infinity"
+              maxWidth="Infinity">
+
+            <padding>
+                <Insets top="20" right="20" bottom="20" left="20"/>
+            </padding>
+
+            <!-- ── RECENT READS HEADER ───────────────────────── -->
+            <HBox alignment="CENTER_LEFT">
+                <Label text="Recent Reads"
+                       styleClass="section-title"/>
+
+                <Region HBox.hgrow="ALWAYS"/>
+
+                <Label text="Open Library >"
+                       onMouseClicked="#onOpenLibrary"
+                       styleClass="link-label"/>
+            </HBox>
+
+            <!-- ── RECENT BOOKS (HORIZONTAL SCROLL) ─────────── -->
+            <ScrollPane fitToHeight="true"
+                        hbarPolicy="AS_NEEDED"
+                        vbarPolicy="NEVER"
+                        style="-fx-background-color: transparent;">
+
+                <content>
+                    <HBox fx:id="recentBox" spacing="16"/>
+                </content>
+            </ScrollPane>
+
+            <!-- ── FAVOURITE HEADER ─────────────────────────── -->
+            <HBox alignment="CENTER_LEFT">
+                <Label text="Favourite Books"
+                       styleClass="section-title"/>
+
+                <Region HBox.hgrow="ALWAYS"/>
+
+                <Label text="See more >"
+                       onMouseClicked="#onSeeMore"
+                       styleClass="link-label"/>
+            </HBox>
+
+            <!-- ── FAVOURITE BOOKS (HORIZONTAL SCROLL) ─────── -->
+            <ScrollPane fitToHeight="true"
+                        hbarPolicy="AS_NEEDED"
+                        vbarPolicy="NEVER"
+                        style="-fx-background-color: transparent;">
+
+                <content>
+                    <HBox fx:id="favBox" spacing="16"/>
+                </content>
+            </ScrollPane>
+
+            <!-- ── SPACER (IMPORTANT FOR FULL HEIGHT) ───────── -->
+            <Region VBox.vgrow="ALWAYS"/>
+
+        </VBox>
+    </content>
+</ScrollPane>

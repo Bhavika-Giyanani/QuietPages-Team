@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.*?>
+<?import javafx.geometry.Insets?>
+
+<DialogPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.quietpages.quietpages.controller.EditBookInfoController"
+            styleClass="edit-dialog-pane"
+            prefWidth="440">
+
+    <headerText>Edit book information</headerText>
+
+    <content>
+        <VBox spacing="16">
+            <padding><Insets top="12" right="0" bottom="0" left="0"/></padding>
+
+            <!-- Cover row -->
+            <HBox spacing="14" alignment="CENTER_LEFT">
+
+                <!-- Cover preview box -->
+                <StackPane styleClass="edit-cover-pane"
+                           minWidth="115" minHeight="160"
+                           maxWidth="115" maxHeight="160">
+                    <ImageView fx:id="coverPreview"
+                               fitWidth="110" fitHeight="155"
+                               preserveRatio="true"/>
+                </StackPane>
+
+                <!-- Cover action buttons -->
+                <VBox spacing="8" alignment="CENTER_LEFT">
+                    <Button fx:id="btnSelectCover" text="Select cover"
+                            styleClass="edit-cover-btn"
+                            onAction="#onSelectCover"/>
+                    <Button fx:id="btnResetCover"
+                            styleClass="edit-cover-reset-btn"
+                            text="↺"
+                            onAction="#onResetCover">
+                        <tooltip><Tooltip text="Reset to original cover"/></tooltip>
+                    </Button>
+                </VBox>
+
+            </HBox>
+
+            <!-- Metadata fields -->
+            <GridPane hgap="12" vgap="10">
+                <columnConstraints>
+                    <ColumnConstraints minWidth="110" maxWidth="110"/>
+                    <ColumnConstraints hgrow="ALWAYS"/>
+                </columnConstraints>
+
+                <Label text="Title :" styleClass="edit-field-label"
+                       GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+                <TextField fx:id="titleField" styleClass="edit-field"
+                           GridPane.columnIndex="1" GridPane.rowIndex="0"
+                           maxWidth="Infinity"/>
+
+                <Label text="Author(s) :" styleClass="edit-field-label"
+                       GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+                <TextField fx:id="authorField" styleClass="edit-field"
+                           GridPane.columnIndex="1" GridPane.rowIndex="1"
+                           maxWidth="Infinity"/>
+
+                <Label text="Language(s) :" styleClass="edit-field-label"
+                       GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+                <TextField fx:id="languageField" styleClass="edit-field"
+                           GridPane.columnIndex="1" GridPane.rowIndex="2"
+                           maxWidth="Infinity"/>
+
+                <Label text="Publisher(s) :" styleClass="edit-field-label"
+                       GridPane.columnIndex="0" GridPane.rowIndex="3"/>
+                <TextField fx:id="publisherField" styleClass="edit-field"
+                           GridPane.columnIndex="1" GridPane.rowIndex="3"
+                           maxWidth="Infinity"/>
+            </GridPane>
+
+        </VBox>
+    </content>
+
+    <buttonTypes>
+        <ButtonType fx:constant="CANCEL"/>
+        <ButtonType text="Save" buttonData="OK_DONE"/>
+    </buttonTypes>
+
+</DialogPane>
