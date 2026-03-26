@@ -1,0 +1,63 @@
+QuietPages
+├── .idea/
+│   ├── .gitignore
+│   ├── encodings.xml
+│   ├── misc.xml
+│   ├── vcs.xml
+│   └── workspace.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   ├── com/
+│   │   │   │   └── quietpages/
+│   │   │   │       └── quietpages/
+│   │   │   │           ├── controller/
+│   │   │   │           │   ├── BookCardController.java
+│   │   │   │           │   ├── EditBookInfoController.java
+│   │   │   │           │   ├── HomeController.java
+│   │   │   │           │   ├── LibraryController.java
+│   │   │   │           │   ├── OnlineBooksController.java
+│   │   │   │           │   ├── ReaderController.java
+│   │   │   │           │   └── SettingsController.java
+│   │   │   │           ├── db/
+│   │   │   │           │   ├── BookDAO.java
+│   │   │   │           │   └── DatabaseManager.java
+│   │   │   │           ├── model/
+│   │   │   │           │   ├── Book.java
+│   │   │   │           │   ├── DownloadEntry.java
+│   │   │   │           │   ├── OnlineSite.java
+│   │   │   │           │   └── OnlineSiteDAO.java
+│   │   │   │           ├── service/
+│   │   │   │           │   ├── LibraryService.java
+│   │   │   │           │   └── OnlineBooksService.java
+│   │   │   │           ├── util/
+│   │   │   │           │   ├── EpubImporter.java
+│   │   │   │           │   └── EpubRenderer.java
+│   │   │   │           ├── HelloApplication.java
+│   │   │   │           ├── HelloController.java
+│   │   │   │           ├── SplashScreen.java
+│   │   │   │           └── ThemeManager.java
+│   │   │   └── module-info.java
+│   │   └── resources/
+│   │       └── com/
+│   │           └── quietpages/
+│   │               └── quietpages/
+│   │                   ├── images/
+│   │                   │   └── logo.jpeg
+│   │                   ├── book-card.fxml
+│   │                   ├── edit-book-info.fxml
+│   │                   ├── hello-view.fxml
+│   │                   ├── home-view.fxml
+│   │                   ├── library-view.fxml
+│   │                   ├── library.css
+│   │                   ├── online-books-view.fxml
+│   │                   ├── reader-view.fxml
+│   │                   ├── reader.css
+│   │                   └── settings-view.fxml
+│   └── test/
+│       └── java/
+├── .gitignore
+├── mvnw
+├── mvnw.cmd
+├── pom.xml
+└── README.md

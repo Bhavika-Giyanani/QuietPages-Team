@@ -1,20 +1,24 @@
 package com.quietpages.quietpages;
 
-import java.net.URL;
-
+import com.quietpages.quietpages.controller.HomeController;
+import com.quietpages.quietpages.controller.LibraryController;
+import com.quietpages.quietpages.controller.ReaderController;
+import com.quietpages.quietpages.model.Book;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.StackPane;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
+
+import java.net.URL;
 
 public class HelloController {
 
+    // ── Static instance so HomeController / other tabs can call back into the
+    // shell
     public static HelloController instance;
 
-    // ── FXML ────────────────────────────────────────────────────────────────
+    // ── FXML ──────────────────────────────────────────────────────────────────
     @FXML
     private BorderPane rootPane;
     @FXML
@@ -22,13 +26,8 @@ public class HelloController {
     @FXML
     private StackPane contentArea;
 
-    // Top bar buttons
     @FXML
     private Button btnMenuToggle;
-    @FXML
-    private Button btnAdd;
-
-    // Sidebar buttons
     @FXML
     private Button btnHome;
     @FXML
@@ -40,60 +39,64 @@ public class HelloController {
     @FXML
     private Button btnSettings;
 
-    // ── State ───────────────────────────────────────────────────────────────
-    private boolean sidebarCollapsed = true;
+    // ── Public getters (used by HomeController fallback) ────────────────────────
+    public Button getBtnHome() {
+        return btnHome;
+    }
 
-    // ── Init ────────────────────────────────────────────────────────────────
+    public Button getBtnLibrary() {
+        return btnLibrary;
+    }
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    private boolean sidebarCollapsed = true;
+    // Track last active button so reader Back knows where to return
+    private Button lastActiveBtn;
+
+    // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
     public void initialize() {
-        instance = this;
+        instance = this; // expose to other controllers (HomeController etc.)
         collapseSidebar();
-
-        // ✅ CHANGE: Load Home instead of Library
-        loadTabSafe("home-view.fxml");
+        showHome();
         setActiveNav(btnHome);
     }
 
-    // ── Sidebar Toggle ──────────────────────────────────────────────────────
+    // ── Hamburger toggle ──────────────────────────────────────────────────────
     @FXML
     private void onMenuToggle() {
         sidebarCollapsed = !sidebarCollapsed;
-        if (sidebarCollapsed) {
+        if (sidebarCollapsed)
             collapseSidebar();
-        } else {
+        else
             expandSidebar();
-        }
     }
 
     private void collapseSidebar() {
         sidebar.setPrefWidth(48);
         sidebar.setMinWidth(48);
         sidebar.setMaxWidth(48);
-
-        setNavButtonText(btnHome, null);
-        setNavButtonText(btnLibrary, null);
-        setNavButtonText(btnCollections, null);
-        setNavButtonText(btnOnlineBooks, null);
-        setNavButtonText(btnSettings, null);
+        setNavText(btnHome, null);
+        setNavText(btnLibrary, null);
+        setNavText(btnCollections, null);
+        setNavText(btnOnlineBooks, null);
+        setNavText(btnSettings, null);
     }
 
     private void expandSidebar() {
         sidebar.setPrefWidth(220);
         sidebar.setMinWidth(220);
         sidebar.setMaxWidth(220);
-
-        setNavButtonText(btnHome, "  Home");
-        setNavButtonText(btnLibrary, "  Library");
-        setNavButtonText(btnCollections, "  Collections");
-        setNavButtonText(btnOnlineBooks, "  Online Books");
-        setNavButtonText(btnSettings, "  Settings");
+        setNavText(btnHome, "  Home");
+        setNavText(btnLibrary, "  Library");
+        setNavText(btnCollections, "  Collections");
+        setNavText(btnOnlineBooks, "  Online Books");
+        setNavText(btnSettings, "  Settings");
     }
 
-    private void setNavButtonText(Button btn, String text) {
-        if (btn == null) {
+    private void setNavText(Button btn, String text) {
+        if (btn == null)
             return;
-        }
-
         if (text == null) {
             btn.setText("");
             btn.setContentDisplay(javafx.scene.control.ContentDisplay.GRAPHIC_ONLY);
@@ -107,10 +110,10 @@ public class HelloController {
         }
     }
 
-    // ── Navigation ──────────────────────────────────────────────────────────
+    // ── Tab navigation ────────────────────────────────────────────────────────
     @FXML
     private void onHome() {
-        loadTabSafe("home-view.fxml");
+        showHome();
         setActiveNav(btnHome);
     }
 
@@ -138,87 +141,146 @@ public class HelloController {
         setActiveNav(btnSettings);
     }
 
-    // ✅ ADD THIS METHOD (FIX FOR YOUR ERROR)
+    // Called by HomeController via instance.goToLibrary()
     public void goToLibrary() {
-        showLibrary();
-        setActiveNav(btnLibrary);
+        onLibrary();
     }
 
-    // ── Library Loader ──────────────────────────────────────────────────────
+    // ── Home tab ──────────────────────────────────────────────────────────────
+    private void showHome() {
+        URL resource = HelloApplication.class.getResource("home-view.fxml");
+        if (resource == null) {
+            showPlaceholder("home-view.fxml");
+            return;
+        }
+        try {
+            FXMLLoader loader = new FXMLLoader(resource);
+            Node view = loader.load();
+            HomeController hc = loader.getController();
+            // Wire open-book callback so home page cards open the reader
+            hc.setOnOpenBook(book -> openReader(book, btnHome));
+            contentArea.getChildren().setAll(view);
+        } catch (Exception e) {
+            System.err.println("[Shell] home-view load failed: " + e.getMessage());
+            showPlaceholder("home-view.fxml");
+        }
+    }
+
+    // ── Library tab ───────────────────────────────────────────────────────────
     private void showLibrary() {
         URL resource = HelloApplication.class.getResource("library-view.fxml");
-
         if (resource == null) {
             showPlaceholder("library-view.fxml");
             return;
         }
-
         try {
             FXMLLoader loader = new FXMLLoader(resource);
             Node view = loader.load();
+            LibraryController lc = loader.getController();
+            // Wire open-book callback so library cards open the reader
+            lc.setOnOpenBook(book -> openReader(book,
+                    lastActiveBtn != null ? lastActiveBtn : btnLibrary));
             contentArea.getChildren().setAll(view);
         } catch (Exception e) {
-            System.err.println("[Shell] Failed to load library-view.fxml: " + e.getMessage());
+            System.err.println("[Shell] library-view load failed: " + e.getMessage());
             showPlaceholder("library-view.fxml");
         }
     }
 
-    // ── Generic Loader ──────────────────────────────────────────────────────
+    // ── Reader ────────────────────────────────────────────────────────────────
+    /**
+     * Opens the reader for a book. Works when called from ANY tab.
+     * Hides the sidebar for full-immersion reading.
+     * When Back is pressed, restores sidebar and returns to the originating tab.
+     *
+     * @param book        the Book to open
+     * @param returnToBtn the sidebar button of the tab that triggered this
+     */
+    public void openReader(Book book, Button returnToBtn) {
+        URL resource = HelloApplication.class.getResource("reader-view.fxml");
+        if (resource == null) {
+            System.err.println("[Shell] reader-view.fxml not found");
+            return;
+        }
+        try {
+            FXMLLoader loader = new FXMLLoader(resource);
+            Node view = loader.load();
+            ReaderController rc = loader.getController();
+
+            // Hide sidebar — full immersion like Aquile Reader
+            sidebar.setVisible(false);
+            sidebar.setManaged(false);
+
+            rc.openBook(book, () -> {
+                // Restore sidebar when Back is pressed
+                sidebar.setVisible(true);
+                sidebar.setManaged(true);
+
+                // Return to the tab that opened the book
+                Button ret = (returnToBtn != null) ? returnToBtn : btnLibrary;
+                if (ret == btnHome) {
+                    showHome();
+                    setActiveNav(btnHome);
+                } else if (ret == btnLibrary) {
+                    showLibrary();
+                    setActiveNav(btnLibrary);
+                } else if (ret == btnCollections) {
+                    loadTabSafe("collections-view.fxml");
+                    setActiveNav(btnCollections);
+                } else {
+                    showLibrary();
+                    setActiveNav(btnLibrary);
+                }
+            });
+
+            contentArea.getChildren().setAll(view);
+            setActiveNav(null); // no sidebar button active while reading
+        } catch (Exception e) {
+            System.err.println("[Shell] reader load failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
     private void loadTabSafe(String fxmlName) {
         URL resource = HelloApplication.class.getResource(fxmlName);
-
         if (resource == null) {
             showPlaceholder(fxmlName);
             return;
         }
-
         try {
             FXMLLoader loader = new FXMLLoader(resource);
             Node view = loader.load();
             contentArea.getChildren().setAll(view);
         } catch (Exception e) {
             System.err.println("[Shell] Failed to load " + fxmlName + ": " + e.getMessage());
-
             Throwable cause = e.getCause();
             while (cause != null) {
                 System.err.println("  Caused by: " + cause);
                 cause = cause.getCause();
             }
-
             showPlaceholder(fxmlName);
         }
     }
 
-    // ── Placeholder ─────────────────────────────────────────────────────────
     private void showPlaceholder(String fxmlName) {
         String tabName = fxmlName.replace("-view.fxml", "").replace("-", " ");
-
         javafx.scene.control.Label label = new javafx.scene.control.Label(
-                tabName.substring(0, 1).toUpperCase() + tabName.substring(1) + " — coming soon"
-        );
-
-        label.setStyle("-fx-text-fill: #888888; -fx-font-size: 16px;");
-
+                tabName.substring(0, 1).toUpperCase() + tabName.substring(1) + " — coming soon");
+        label.setStyle("-fx-text-fill:#888888;-fx-font-size:16px;");
         StackPane placeholder = new StackPane(label);
-        placeholder.setStyle("-fx-background-color: #2B2B2B;");
-
+        placeholder.setStyle("-fx-background-color:#2B2B2B;");
         contentArea.getChildren().setAll(placeholder);
     }
 
-    // ── Active Nav Highlight ────────────────────────────────────────────────
     private void setActiveNav(Button active) {
-        for (Node n : sidebar.getChildren()) {
-            if (n instanceof Button b) {
+        if (active != null)
+            lastActiveBtn = active;
+        for (javafx.scene.Node n : sidebar.getChildren()) {
+            if (n instanceof Button b)
                 b.getStyleClass().remove("nav-active");
-            }
         }
-
-        if (active != null) {
+        if (active != null)
             active.getStyleClass().add("nav-active");
-        }
-    }
-
-    public void setContent(Node node) {
-        contentArea.getChildren().setAll(node);
     }
 }

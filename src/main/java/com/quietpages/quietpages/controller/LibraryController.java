@@ -24,80 +24,121 @@ import javafx.stage.Stage;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
  * Controller for library-view.fxml — the Library tab.
  *
  * Responsibilities:
- *  - Toolbar: filter dropdown, search, group, sort, add, multi-select
- *  - Book grid: render covers + labels, grouping headers
- *  - Right-click context menu on book cards
- *  - Book Info side panel
- *  - Edit Book Info dialog
- *  - Multi-select: checkboxes, select all, delete selected
+ * - Toolbar: filter dropdown, search, group, sort, add, multi-select
+ * - Book grid: render covers + labels, grouping headers
+ * - Right-click context menu on book cards
+ * - Book Info side panel
+ * - Edit Book Info dialog
+ * - Multi-select: checkboxes, select all, delete selected
  */
 public class LibraryController {
 
     // ── FXML injections ───────────────────────────────────────────────────────
-    @FXML private Label         currentFilterLabel;   // "All Books ▾"
-    @FXML private Button        btnFilter;            // filter dropdown trigger
-    @FXML private Button        btnSearch;
-    @FXML private Button        btnGroup;
-    @FXML private Button        btnSort;
-    @FXML private Button        btnAdd;
-    @FXML private Button        btnMultiSelect;
+    @FXML
+    private Label currentFilterLabel; // "All Books ▾"
+    @FXML
+    private Button btnFilter; // filter dropdown trigger
+    @FXML
+    private Button btnSearch;
+    @FXML
+    private Button btnGroup;
+    @FXML
+    private Button btnSort;
+    @FXML
+    private Button btnAdd;
+    @FXML
+    private Button btnMultiSelect;
 
     // Multi-select extras (hidden until multi-select active)
-    @FXML private Button        btnSelectAll;
-    @FXML private Button        btnDeleteSelected;
-    @FXML private HBox          multiSelectBar;       // contains Select All + Delete
+    @FXML
+    private Button btnSelectAll;
+    @FXML
+    private Button btnDeleteSelected;
+    @FXML
+    private HBox multiSelectBar; // contains Select All + Delete
 
     // Search bar (hidden until search active)
-    @FXML private TextField     searchField;
-    @FXML private Button        btnSearchClear;
-    @FXML private HBox          searchBar;
+    @FXML
+    private TextField searchField;
+    @FXML
+    private Button btnSearchClear;
+    @FXML
+    private HBox searchBar;
 
     // Main grid
-    @FXML private ScrollPane    scrollPane;
-    @FXML private VBox          contentVBox;          // groups stacked vertically
+    @FXML
+    private ScrollPane scrollPane;
+    @FXML
+    private VBox contentVBox; // groups stacked vertically
 
     // Book Info side panel
-    @FXML private VBox          bookInfoPanel;
-    @FXML private ImageView     infoCoverImage;
-    @FXML private Label         infoTitle;
-    @FXML private Label         infoAuthor;
-    @FXML private Label         infoProgressText;
-    @FXML private Label         infoDateAdded;
-    @FXML private Label         infoLastRead;
-    @FXML private Label         infoWordCount;
-    @FXML private Label         infoLineCount;
-    @FXML private Label         infoDescription;
-    @FXML private Label         infoSeries;
-    @FXML private Label         infoLanguage;
-    @FXML private Label         infoPublisher;
-    @FXML private Label         infoGenre;
-    @FXML private Label         infoFilePath;
-    @FXML private Button        btnInfoOpenBook;
-    @FXML private Button        btnInfoEditBookInfo;
-    @FXML private Button        btnInfoClose;
+    @FXML
+    private VBox bookInfoPanel;
+    @FXML
+    private ImageView infoCoverImage;
+    @FXML
+    private Label infoTitle;
+    @FXML
+    private Label infoAuthor;
+    @FXML
+    private Label infoProgressText;
+    @FXML
+    private Label infoDateAdded;
+    @FXML
+    private Label infoLastRead;
+    @FXML
+    private Label infoWordCount;
+    @FXML
+    private Label infoLineCount;
+    @FXML
+    private Label infoDescription;
+    @FXML
+    private Label infoSeries;
+    @FXML
+    private Label infoLanguage;
+    @FXML
+    private Label infoPublisher;
+    @FXML
+    private Label infoGenre;
+    @FXML
+    private Label infoFilePath;
+    @FXML
+    private Button btnInfoOpenBook;
+    @FXML
+    private Button btnInfoEditBookInfo;
+    @FXML
+    private Button btnInfoClose;
 
     // ── State ─────────────────────────────────────────────────────────────────
     private final LibraryService service = LibraryService.getInstance();
     private ObservableList<Book> currentBooks = FXCollections.observableArrayList();
 
-    private FilterOption activeFilter   = FilterOption.ALL;
-    private GroupOption  activeGroup    = GroupOption.NONE;
-    private SortOption   activeSort     = SortOption.LAST_READ_TIME;
+    private FilterOption activeFilter = FilterOption.ALL;
+    private GroupOption activeGroup = GroupOption.NONE;
+    private SortOption activeSort = SortOption.LAST_READ_TIME;
 
-    private boolean multiSelectMode     = false;
-    private boolean searchMode          = false;
+    private boolean multiSelectMode = false;
+    private boolean searchMode = false;
 
     // Map from book card root node → its controller (for selection management)
     private final Map<Node, BookCardController> cardControllers = new LinkedHashMap<>();
 
     // Currently selected book for Info panel
     private Book selectedBook = null;
+
+    // Callback set by HelloController so opening a book launches the reader
+    private Consumer<Book> onOpenBook;
+
+    public void setOnOpenBook(Consumer<Book> callback) {
+        this.onOpenBook = callback;
+    }
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
@@ -117,7 +158,8 @@ public class LibraryController {
     // ── Load / Render ─────────────────────────────────────────────────────────
     private void loadBooks() {
         Task<ObservableList<Book>> task = new Task<>() {
-            @Override protected ObservableList<Book> call() {
+            @Override
+            protected ObservableList<Book> call() {
                 ObservableList<Book> books = service.getFilteredBooks(activeFilter);
                 service.sort(books, activeSort);
                 return books;
@@ -143,7 +185,8 @@ public class LibraryController {
             FlowPane flow = createFlowPane();
             for (Book book : currentBooks) {
                 Node card = createBookCard(book);
-                if (card != null) flow.getChildren().add(card);
+                if (card != null)
+                    flow.getChildren().add(card);
             }
             contentVBox.getChildren().add(flow);
         } else {
@@ -170,7 +213,8 @@ public class LibraryController {
                 FlowPane flow = createFlowPane();
                 for (Book book : grouped.get(groupKey)) {
                     Node card = createBookCard(book);
-                    if (card != null) flow.getChildren().add(card);
+                    if (card != null)
+                        flow.getChildren().add(card);
                 }
                 contentVBox.getChildren().add(flow);
             }
@@ -206,8 +250,7 @@ public class LibraryController {
             });
 
             // Right-click context menu
-            card.setOnContextMenuRequested(e ->
-                    showContextMenu(book, ctrl, card, e.getScreenX(), e.getScreenY()));
+            card.setOnContextMenuRequested(e -> showContextMenu(book, ctrl, card, e.getScreenX(), e.getScreenY()));
 
             return card;
         } catch (IOException e) {
@@ -271,7 +314,8 @@ public class LibraryController {
             return;
         }
         Task<ObservableList<Book>> task = new Task<>() {
-            @Override protected ObservableList<Book> call() {
+            @Override
+            protected ObservableList<Book> call() {
                 return service.search(keyword);
             }
         };
@@ -287,7 +331,8 @@ public class LibraryController {
         ContextMenu menu = new ContextMenu();
         for (GroupOption opt : GroupOption.values()) {
             MenuItem item = new MenuItem(opt.getLabel());
-            if (opt == activeGroup) item.setGraphic(makeCheckIcon());
+            if (opt == activeGroup)
+                item.setGraphic(makeCheckIcon());
             item.setOnAction(e -> {
                 activeGroup = opt;
                 renderGrid();
@@ -302,7 +347,8 @@ public class LibraryController {
         ContextMenu menu = new ContextMenu();
         for (SortOption opt : SortOption.values()) {
             MenuItem item = new MenuItem(opt.getLabel());
-            if (opt == activeSort) item.setGraphic(makeCheckIcon());
+            if (opt == activeSort)
+                item.setGraphic(makeCheckIcon());
             item.setOnAction(e -> {
                 activeSort = opt;
                 service.sort(currentBooks, activeSort);
@@ -333,24 +379,27 @@ public class LibraryController {
         chooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("eBook Files", "*.epub", "*.pdf"),
                 new FileChooser.ExtensionFilter("EPUB Files", "*.epub"),
-                new FileChooser.ExtensionFilter("PDF Files",  "*.pdf")
-        );
+                new FileChooser.ExtensionFilter("PDF Files", "*.pdf"));
         Stage stage = (Stage) btnAdd.getScene().getWindow();
         List<File> files = chooser.showOpenMultipleDialog(stage);
-        if (files == null || files.isEmpty()) return;
+        if (files == null || files.isEmpty())
+            return;
 
         Task<Integer> task = new Task<>() {
-            @Override protected Integer call() {
+            @Override
+            protected Integer call() {
                 int count = 0;
                 for (File f : files) {
-                    if (service.importFile(f) != null) count++;
+                    if (service.importFile(f) != null)
+                        count++;
                 }
                 return count;
             }
         };
         task.setOnSucceeded(e -> {
             int added = task.getValue();
-            if (added > 0) loadBooks();
+            if (added > 0)
+                loadBooks();
             showNotification(added > 0 ? "Added " + added + " book(s)." : "No new books added.");
         });
         new Thread(task).start();
@@ -361,16 +410,19 @@ public class LibraryController {
         chooser.setTitle("Add Folder");
         Stage stage = (Stage) btnAdd.getScene().getWindow();
         File folder = chooser.showDialog(stage);
-        if (folder == null) return;
+        if (folder == null)
+            return;
 
         Task<Integer> task = new Task<>() {
-            @Override protected Integer call() {
+            @Override
+            protected Integer call() {
                 return service.importFolder(folder);
             }
         };
         task.setOnSucceeded(e -> {
             int added = task.getValue();
-            if (added > 0) loadBooks();
+            if (added > 0)
+                loadBooks();
             showNotification("Added " + added + " book(s) from folder.");
         });
         new Thread(task).start();
@@ -416,7 +468,8 @@ public class LibraryController {
                 .map(c -> c.getBook().getId())
                 .collect(Collectors.toList());
 
-        if (ids.isEmpty()) return;
+        if (ids.isEmpty())
+            return;
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Remove Books");
@@ -441,16 +494,16 @@ public class LibraryController {
     // ── Context Menu ──────────────────────────────────────────────────────────
 
     private void showContextMenu(Book book, BookCardController ctrl, Node card,
-                                 double screenX, double screenY) {
+            double screenX, double screenY) {
         ContextMenu menu = new ContextMenu();
         menu.getStyleClass().add("library-context-menu");
 
-        MenuItem open     = menuItem("Open Book");
-        MenuItem fav      = menuItem(book.isFavourite() ? "Remove Favourite" : "Add Favourite");
-        MenuItem info     = menuItem("Book Info");
-        MenuItem edit     = menuItem("Edit Book Info");
-        MenuItem remove   = menuItem("Remove");
-        MenuItem pin      = menuItem(book.isPinnedToStart() ? "Unpin from Start" : "Pin to Start");
+        MenuItem open = menuItem("Open Book");
+        MenuItem fav = menuItem(book.isFavourite() ? "Remove Favourite" : "Add Favourite");
+        MenuItem info = menuItem("Book Info");
+        MenuItem edit = menuItem("Edit Book Info");
+        MenuItem remove = menuItem("Remove");
+        MenuItem pin = menuItem(book.isPinnedToStart() ? "Unpin from Start" : "Pin to Start");
 
         open.setOnAction(e -> openBook(book));
         fav.setOnAction(e -> {
@@ -479,36 +532,48 @@ public class LibraryController {
         bookInfoPanel.setManaged(true);
 
         Image cover = book.getCoverImage();
-        if (cover != null) infoCoverImage.setImage(cover);
+        if (cover != null)
+            infoCoverImage.setImage(cover);
 
         infoTitle.setText(book.getTitle());
         infoAuthor.setText(book.getAuthor());
         infoProgressText.setText("Percentage read : " + book.getReadingProgressText());
 
         String added = book.getDateAdded() != null
-                ? book.getDateAdded().toString().replace("T", " ") : "—";
+                ? book.getDateAdded().toString().replace("T", " ")
+                : "—";
         infoDateAdded.setText("Date added : " + added);
 
         String lastRead = book.getLastRead() != null
-                ? book.getLastRead().toString().replace("T", " ") : "—";
+                ? book.getLastRead().toString().replace("T", " ")
+                : "—";
         infoLastRead.setText("Last read : " + lastRead);
 
         infoWordCount.setText("Word count : " + book.getWordCount());
         infoLineCount.setText("Line count : " + book.getLineCount());
         infoDescription.setText("Description : " + book.getDescription());
-        infoSeries.setText("Series : " + (book.getSeries().isEmpty() ? "—" :
-                "[" + book.getSeriesNumber() + "]"));
+        infoSeries.setText("Series : " + (book.getSeries().isEmpty() ? "—" : "[" + book.getSeriesNumber() + "]"));
         infoLanguage.setText("Language : " + book.getLanguage());
         infoPublisher.setText("Publisher : " + book.getPublisher());
         infoGenre.setText("Genre : " + book.getGenre());
         infoFilePath.setText("File path : " + book.getFilePath());
     }
 
-    @FXML private void onInfoOpenBook()     { if (selectedBook != null) openBook(selectedBook); }
-    @FXML private void onInfoEditBookInfo() { if (selectedBook != null) {
-        showEditBookInfo(selectedBook, null);
-    }}
-    @FXML private void onInfoClose() {
+    @FXML
+    private void onInfoOpenBook() {
+        if (selectedBook != null)
+            openBook(selectedBook);
+    }
+
+    @FXML
+    private void onInfoEditBookInfo() {
+        if (selectedBook != null) {
+            showEditBookInfo(selectedBook, null);
+        }
+    }
+
+    @FXML
+    private void onInfoClose() {
         bookInfoPanel.setVisible(false);
         bookInfoPanel.setManaged(false);
         selectedBook = null;
@@ -535,7 +600,8 @@ public class LibraryController {
             if (result.isPresent() && result.get().getButtonData() == ButtonBar.ButtonData.OK_DONE) {
                 editCtrl.applyChanges();
                 service.save(book);
-                if (ctrl != null) ctrl.refresh();
+                if (ctrl != null)
+                    ctrl.refresh();
                 if (selectedBook != null && selectedBook.getId() == book.getId()) {
                     showBookInfo(book);
                 }
@@ -549,10 +615,11 @@ public class LibraryController {
     // ── Operations ────────────────────────────────────────────────────────────
 
     private void openBook(Book book) {
-        // Notify Home/Reader tab via shared event bus or direct controller reference
-        // For now: print to console. The Reader tab teammate hooks in here.
-        System.out.println("[Library] Open book requested: " + book.getTitle());
-        // TODO: HelloApplication.getInstance().showReaderTab(book);
+        if (onOpenBook != null) {
+            onOpenBook.accept(book);
+        } else {
+            System.out.println("[Library] onOpenBook callback not set for: " + book.getTitle());
+        }
     }
 
     private void removeBook(Book book) {
@@ -579,6 +646,7 @@ public class LibraryController {
         lbl.setStyle("-fx-text-fill: #C0284A; -fx-font-weight: bold;");
         return lbl;
     }
+
     // ── Styled alert helper ───────────────────────────────────────────────────
     private Alert createStyledAlert(String title, String header, String content) {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
@@ -622,8 +690,10 @@ public class LibraryController {
 
         return alert;
     }
+
     private void showNotification(String message) {
-        // Simple tooltip-style notification — can be upgraded with ControlsFX Notifications
+        // Simple tooltip-style notification — can be upgraded with ControlsFX
+        // Notifications
         Platform.runLater(() -> {
             Tooltip tip = new Tooltip(message);
             tip.setAutoHide(true);
@@ -631,7 +701,9 @@ public class LibraryController {
                     btnAdd.localToScreen(0, 0).getX(),
                     btnAdd.localToScreen(0, 0).getY() + 30);
             new java.util.Timer().schedule(new java.util.TimerTask() {
-                public void run() { Platform.runLater(tip::hide); }
+                public void run() {
+                    Platform.runLater(tip::hide);
+                }
             }, 2000);
         });
     }
