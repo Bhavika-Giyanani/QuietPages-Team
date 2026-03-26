@@ -1,562 +1,371 @@
 /* ══════════════════════════════════════════════════════════════════════════════
    QuietPages — Reader Tab Stylesheet  (reader.css)
-   Loaded exclusively by the Reader tab. Does NOT affect other tabs.
-
-   ╔══════════════════════════════════════════════════════════╗
-   ║  THEME CUSTOMIZATION GUIDE FOR FUTURE SETTINGS TAB       ║
-   ║                                                          ║
-   ║  To implement reader themes (e.g. dark, sepia, light):   ║
-   ║  Override only the variables in the .reader-root block.  ║
-   ║  Everything else inherits automatically.                 ║
-   ║                                                          ║
-   ║  ThemeManager.applyReaderTheme() should inject a block:  ║
-   ║    .reader-root {                                        ║
-   ║        -r-bg:   #FAF3E0;  /* sepia background */         ║
-   ║        -r-text: #3B2B1A;  /* sepia text       */         ║
-   ║        ... etc                                           ║
-   ║    }                                                     ║
-   ╚══════════════════════════════════════════════════════════╝
+   Fully rewritten to fix:
+     - Side-by-side two-page spread without vertical scrollbars on WebViews
+     - No blink on page turn (opacity transition)
+     - Better typography and visibility
+     - TOC popup below button
    ══════════════════════════════════════════════════════════════════════════════ */
 
-
-/* ── 1. READER COLOR TOKENS ──────────────────────────────────────────────────
-   Change these to switch the entire reader between dark / light / sepia.
-   These are the ONLY values you need to change for a theme switch.
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 1. READER COLOR TOKENS ──────────────────────────────────────────────────*/
 .reader-root {
-    /* ── Background colors ── */
-    -r-bg:              #0D0D0D;    /* main reading area background        */
-    -r-bg-toolbar:      #111111;    /* top toolbar background              */
-    -r-bg-statusbar:    #0D0D0D;    /* bottom status bar background        */
-    -r-bg-popup:        #1E1E1E;    /* floating popups (TOC, search, style) */
-    -r-bg-popup-item:   #252525;    /* popup list item background          */
-    -r-bg-popup-hover:  #2E2E2E;    /* popup list item hover               */
+  -r-bg: #0d0d0d;
+  -r-bg-toolbar: #111111;
+  -r-bg-statusbar: #0a0a0a;
+  -r-bg-popup: #1a1a1a;
+  -r-bg-popup-item: #222222;
+  -r-bg-popup-hover: #2a2a2a;
 
-    /* ── Text colors ── */
-    -r-text:            #E8E8E8;    /* main reading text color             */
-    -r-text-toolbar:    #AAAAAA;    /* toolbar icon/label color            */
-    -r-text-toolbar-hover: #FFFFFF; /* toolbar icon hover color            */
-    -r-text-status:     #555555;    /* bottom status bar text              */
-    -r-text-popup:      #DDDDDD;    /* popup text color                    */
-    -r-text-popup-muted:#888888;    /* popup secondary text                */
+  -r-text: #e8e8e8;
+  -r-text-toolbar: #888888;
+  -r-text-toolbar-hover: #eeeeee;
+  -r-text-status: #444444;
+  -r-text-popup: #cccccc;
+  -r-text-popup-muted: #777777;
 
-    /* ── Border / divider colors ── */
-    -r-border:          #1E1E1E;    /* toolbar/statusbar separator line    */
-    -r-border-popup:    #2A2A2A;    /* popup border                        */
-    -r-divider:         #1A1A1A;    /* center divider between two pages    */
+  -r-border: #1e1e1e;
+  -r-border-popup: #2e2e2e;
+  -r-divider: rgba(255, 255, 255, 0.06);
 
-    /* ── Accent colors ── */
-    -r-accent:          #C0284A;    /* slider thumb, active button border  */
-    -r-accent-hover:    #D42F54;    /* accent on hover                     */
-    -r-accent-bg:       rgba(192,40,74,0.15); /* accent background tint    */
+  -r-accent: #c0284a;
+  -r-accent-hover: #d42f54;
+  -r-accent-bg: rgba(192, 40, 74, 0.12);
 
-    /* ── Nav button colors ── */
-    -r-nav-icon:        rgba(255,255,255,0.12);  /* arrow icon default     */
-    -r-nav-icon-hover:  rgba(255,255,255,0.55);  /* arrow icon hover       */
-    -r-nav-bg-hover:    rgba(255,255,255,0.05);  /* arrow button hover bg  */
+  -r-nav-icon: rgba(255, 255, 255, 0.1);
+  -r-nav-icon-hover: rgba(255, 255, 255, 0.6);
+  -r-nav-bg-hover: rgba(255, 255, 255, 0.04);
 }
 
-
-/* ── 2. ROOT CONTAINER ───────────────────────────────────────────────────────
-   The root BorderPane of the entire reader screen.
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 2. ROOT CONTAINER ───────────────────────────────────────────────────────*/
 .reader-root {
-    -fx-background-color: -r-bg;
+  -fx-background-color: -r-bg;
 }
 
-
-/* ── 3. TOP TOOLBAR ──────────────────────────────────────────────────────────
-   Matches Aquile Reader: very dark bar, no visible border on left/right.
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 3. TOP TOOLBAR ──────────────────────────────────────────────────────────*/
 .reader-toolbar {
-    -fx-background-color: -r-bg-toolbar;
-    -fx-border-color:     transparent transparent -r-border transparent;
-    -fx-border-width:     0 0 1 0;
-    -fx-min-height:       52px;
-    -fx-max-height:       52px;
-    -fx-padding:          0 8 0 4;
-    -fx-spacing:          2;
+  -fx-background-color: -r-bg-toolbar;
+  -fx-border-color: transparent transparent -r-border transparent;
+  -fx-border-width: 0 0 1 0;
+  -fx-min-height: 52px;
+  -fx-max-height: 52px;
+  -fx-padding: 0 8 0 4;
+  -fx-spacing: 2;
 }
 
-/* ── Toolbar buttons ── */
 .reader-toolbar-btn {
-    -fx-background-color: transparent;
-    -fx-pref-width:       42px;
-    -fx-pref-height:      42px;
-    -fx-min-width:        42px;
-    -fx-cursor:           hand;
-    -fx-padding:          0;
-    -fx-background-radius: 4;
-    -fx-border-width:     0;
+  -fx-background-color: transparent;
+  -fx-pref-width: 40px;
+  -fx-pref-height: 40px;
+  -fx-min-width: 40px;
+  -fx-cursor: hand;
+  -fx-padding: 0;
+  -fx-background-radius: 5;
+  -fx-border-width: 0;
 }
 
 .reader-toolbar-btn .ikonli-font-icon {
-    /* ── CHANGE -r-text-toolbar to change icon color ── */
-    -fx-icon-color: -r-text-toolbar;
+  -fx-icon-color: -r-text-toolbar;
 }
 
 .reader-toolbar-btn:hover {
-    -fx-background-color: rgba(255,255,255,0.07);
+  -fx-background-color: rgba(255, 255, 255, 0.07);
 }
 
 .reader-toolbar-btn:hover .ikonli-font-icon {
-    /* ── CHANGE -r-text-toolbar-hover to change hover icon color ── */
-    -fx-icon-color: -r-text-toolbar-hover;
+  -fx-icon-color: -r-text-toolbar-hover;
 }
 
-/* Disabled toolbar buttons (not-yet-implemented features) */
 .reader-toolbar-btn:disabled {
-    -fx-opacity: 0.35;
+  -fx-opacity: 0.28;
 }
 
-/* Active/pressed state for toggle buttons (e.g. search open) */
 .reader-toolbar-btn.active {
-    -fx-background-color: -r-accent-bg;
-    -fx-border-color:     -r-accent;
-    -fx-border-radius:    4;
-    -fx-border-width:     1;
+  -fx-background-color: -r-accent-bg;
+  -fx-border-color: -r-accent;
+  -fx-border-radius: 5;
+  -fx-border-width: 1;
 }
 
 .reader-toolbar-btn.active .ikonli-font-icon {
-    -fx-icon-color: -r-accent;
+  -fx-icon-color: -r-accent;
 }
 
-/* Book title in toolbar */
 .reader-book-title {
-    -fx-text-fill: -r-text-toolbar;  /* CHANGE -r-text-toolbar for title color */
-    -fx-font-size: 14px;
-    -fx-padding:   0 0 0 8;
+  -fx-text-fill: -r-text-toolbar;
+  -fx-font-size: 13px;
+  -fx-padding: 0 0 0 8;
+  -fx-opacity: 0.8;
 }
-
 
 /* ── 4. MAIN READING AREA ────────────────────────────────────────────────────
-   The StackPane holding the two WebViews and nav arrow buttons.
+   Critical: readerStack and webViewContainer must fill the center pane
+   completely. WebViews inside get 50% width each via HBox ALWAYS grow.
+   The WebViews themselves should NOT show their own scroll bars — scrolling
+   within the chapter content is handled natively by WebKit; we inject CSS
+   into each chapter HTML that allows vertical scrolling in the content itself.
    ─────────────────────────────────────────────────────────────────────────── */
+
 .reader-stack {
-    -fx-background-color: -r-bg;  /* CHANGE -r-bg for page background */
+  -fx-background-color: -r-bg;
 }
 
-/* HBox holding left + divider + right WebView columns */
+/* ── HBox holding left + divider + right WebView ── */
 .reader-pages {
-    -fx-background-color: -r-bg;
-    -fx-spacing:          0;
+  -fx-background-color: -r-bg;
+  -fx-spacing: 0;
+  /* Fill all available height */
+  -fx-pref-height: 10000; /* effectively "grow to fill" */
 }
 
-/* 1px center line between the two pages */
+/* 1px center line between pages */
 .reader-page-divider {
-    -fx-background-color: -r-divider;  /* CHANGE -r-divider for center line color */
-    -fx-min-width:  1px;
-    -fx-max-width:  1px;
-    -fx-pref-width: 1px;
+  -fx-background-color: -r-divider;
+  -fx-min-width: 1px;
+  -fx-max-width: 1px;
+  -fx-pref-width: 1px;
 }
 
-/* Loading overlay shown while EPUB chapters are being themed */
-.reader-loading-overlay {
-    -fx-background-color: -r-bg;
-}
-
-.reader-loading-label {
-    -fx-text-fill: -r-text-popup-muted;
-    -fx-font-size: 14px;
-}
-
-
-/* ── 5. NAVIGATION ARROW BUTTONS ─────────────────────────────────────────────
-   Overlaid on the left/right edges of the reading area.
-   Nearly invisible by default, visible on hover — exactly like Aquile Reader.
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 5. NAVIGATION ARROW BUTTONS ─────────────────────────────────────────────*/
 .reader-nav-btn {
-    -fx-background-color:  transparent;
-    -fx-pref-width:        48px;
-    -fx-min-width:         48px;
-    -fx-pref-height:       100px;
-    -fx-cursor:            hand;
-    -fx-background-radius: 0;
-    -fx-padding:           0;
-    -fx-border-width:      0;
+  -fx-background-color: transparent;
+  -fx-pref-width: 52px;
+  -fx-min-width: 52px;
+  -fx-pref-height: 120px;
+  -fx-cursor: hand;
+  -fx-background-radius: 0;
+  -fx-padding: 0;
+  -fx-border-width: 0;
 }
 
 .reader-nav-btn .ikonli-font-icon {
-    /* ── CHANGE -r-nav-icon to change arrow icon default opacity ── */
-    -fx-icon-color: -r-nav-icon;
+  -fx-icon-color: -r-nav-icon;
 }
 
 .reader-nav-btn:hover {
-    -fx-background-color: -r-nav-bg-hover;
+  -fx-background-color: -r-nav-bg-hover;
 }
 
 .reader-nav-btn:hover .ikonli-font-icon {
-    /* ── CHANGE -r-nav-icon-hover to change arrow icon hover color ── */
-    -fx-icon-color: -r-nav-icon-hover;
+  -fx-icon-color: -r-nav-icon-hover;
 }
 
-.reader-nav-left  { -fx-background-radius: 0 4 4 0; }
-.reader-nav-right { -fx-background-radius: 4 0 0 4; }
+.reader-nav-left {
+  -fx-background-radius: 0 6 6 0;
+}
+.reader-nav-right {
+  -fx-background-radius: 6 0 0 6;
+}
 
-
-/* ── 6. STATUS BAR ───────────────────────────────────────────────────────────
-   Bottom bar: breadcrumb on left, percentage on right.
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 6. STATUS BAR ───────────────────────────────────────────────────────────*/
 .reader-statusbar {
-    /* ── CHANGE -r-bg-statusbar for status bar background ── */
-    -fx-background-color: -r-bg-statusbar;
-    -fx-border-color:     -r-border transparent transparent transparent;
-    -fx-border-width:     1 0 0 0;
-    -fx-min-height:       32px;
-    -fx-max-height:       32px;
-    -fx-padding:          0 16 0 16;
+  -fx-background-color: -r-bg-statusbar;
+  -fx-border-color: -r-border transparent transparent transparent;
+  -fx-border-width: 1 0 0 0;
+  -fx-min-height: 30px;
+  -fx-max-height: 30px;
+  -fx-padding: 0 16 0 16;
 }
 
 .reader-status-breadcrumb {
-    /* ── CHANGE -r-text-status for breadcrumb text color ── */
-    -fx-text-fill: -r-text-status;
-    -fx-font-size: 12px;
+  -fx-text-fill: -r-text-status;
+  -fx-font-size: 11px;
 }
 
 .reader-status-progress {
-    /* ── CHANGE -r-text-status for percentage text color ── */
-    -fx-text-fill: -r-text-status;
-    -fx-font-size: 12px;
+  -fx-text-fill: -r-text-status;
+  -fx-font-size: 11px;
 }
 
-
-/* ── 7. FLOATING POPUP PANELS ────────────────────────────────────────────────
-   TOC panel, Search panel, Text Style panel.
-   All use the same dark floating card style (matching Aquile Reader).
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 7. FLOATING POPUP PANELS ────────────────────────────────────────────────*/
 .reader-popup {
-    /* ── CHANGE -r-bg-popup for popup card background ── */
-    -fx-background-color:  -r-bg-popup;
-    -fx-border-color:      -r-border-popup;
-    -fx-border-width:      1;
-    -fx-border-radius:     6;
-    -fx-background-radius: 6;
-    -fx-effect:            dropshadow(gaussian, rgba(0,0,0,0.7), 20, 0, 0, 4);
+  -fx-background-color: -r-bg-popup;
+  -fx-border-color: -r-border-popup;
+  -fx-border-width: 1;
+  -fx-border-radius: 8;
+  -fx-background-radius: 8;
+  -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.8), 24, 0, 0, 6);
 }
 
-/* Popup section heading (e.g. "Line space") */
 .reader-popup-label {
-    -fx-text-fill: -r-text-popup;  /* CHANGE -r-text-popup for popup label color */
-    -fx-font-size: 13px;
+  -fx-text-fill: -r-text-popup-muted;
+  -fx-font-size: 11px;
+  -fx-font-weight: bold;
+  -fx-text-transform: uppercase;
 }
 
-/* Popup muted / secondary text */
 .reader-popup-muted {
-    -fx-text-fill: -r-text-popup-muted;
-    -fx-font-size: 12px;
+  -fx-text-fill: -r-text-popup-muted;
+  -fx-font-size: 11px;
 }
 
-
-/* ── 8. TOC PANEL ────────────────────────────────────────────────────────────
-   Slides in from the left, covers the reading area.
-   ─────────────────────────────────────────────────────────────────────────── */
-.reader-toc-panel {
-    /* ── CHANGE -r-bg-popup for TOC panel background ── */
-    -fx-background-color: -r-bg-popup;
-    -fx-border-color:     transparent -r-border-popup transparent transparent;
-    -fx-border-width:     0 1 0 0;
-}
-
-/* Each TOC row */
-.reader-toc-item {
-    -fx-background-color: transparent;
-    -fx-padding:          8 16 8 16;
-    -fx-cursor:           hand;
-}
-
-.reader-toc-item:hover {
-    -fx-background-color: -r-bg-popup-hover;
-}
-
-.reader-toc-item .label {
-    -fx-text-fill: -r-text-popup;
-    -fx-font-size: 13px;
-}
-
-/* Nested TOC items indented */
-.reader-toc-item-child {
-    -fx-background-color: transparent;
-    -fx-padding:          6 16 6 32;
-    -fx-cursor:           hand;
-}
-
-.reader-toc-item-child:hover {
-    -fx-background-color: -r-bg-popup-hover;
-}
-
-.reader-toc-item-child .label {
-    -fx-text-fill: -r-text-popup-muted;
-    -fx-font-size: 12px;
-}
-
-/* TOC TreeView overall */
-.reader-toc-tree {
-    -fx-background-color: transparent;
-    -fx-border-color:     transparent;
-    -fx-padding:          4 0;
-}
-
-/* TOC TreeView cells */
-.reader-toc-tree .tree-cell {
-    -fx-background-color: transparent;
-    -fx-text-fill:        -r-text-popup;
-    -fx-font-size:        13px;
-    -fx-padding:          6 8;
-    -fx-cursor:           hand;
-}
-
-.reader-toc-tree .tree-cell:hover {
-    -fx-background-color: -r-bg-popup-hover;
-}
-
-.reader-toc-tree .tree-cell:selected {
-    -fx-background-color: -r-accent-bg;
-    -fx-text-fill:        -r-text-popup;
-}
-
-/* Arrow disclosure triangles */
-.reader-toc-tree .tree-cell > .tree-disclosure-node > .arrow {
-    -fx-background-color: -r-text-popup-muted;
-}
-
-/* TOC header label */
-.reader-toc-header {
-    -fx-text-fill: -r-text-popup;
-    -fx-font-size: 16px;
-    -fx-font-weight: bold;
-    -fx-padding: 16 16 8 16;
-    -fx-border-color: transparent transparent -r-border-popup transparent;
-    -fx-border-width: 0 0 1 0;
-}
-
-
-/* ── 9. SEARCH POPUP ─────────────────────────────────────────────────────────
-   Small floating panel, top-right corner (matches screenshot Image 2).
-   ─────────────────────────────────────────────────────────────────────────── */
-
-/* Search text field */
+/* ── 8. SEARCH POPUP ─────────────────────────────────────────────────────────*/
 .reader-search-field {
-    -fx-background-color:  #1A1A1A;
-    -fx-text-fill:         -r-text-popup;
-    -fx-prompt-text-fill:  -r-text-popup-muted;
-    /* ── CHANGE border-color below to change the search field underline ── */
-    -fx-border-color:      -r-accent;
-    -fx-border-width:      0 0 2 0;
-    -fx-background-radius: 3;
-    -fx-padding:           5 8;
-    -fx-font-size:         13px;
+  -fx-background-color: #141414;
+  -fx-text-fill: -r-text-popup;
+  -fx-prompt-text-fill: -r-text-popup-muted;
+  -fx-border-color: -r-accent;
+  -fx-border-width: 0 0 2 0;
+  -fx-background-radius: 4;
+  -fx-padding: 6 10;
+  -fx-font-size: 13px;
 }
 
-/* "Aa" and "Ab|" toggle buttons */
 .reader-search-toggle {
-    -fx-background-color:  #2A2A2A;
-    -fx-text-fill:         -r-text-popup;
-    -fx-border-color:      #444444;
-    -fx-border-radius:     4;
-    -fx-background-radius: 4;
-    -fx-font-size:         11px;
-    -fx-padding:           3 8;
-    -fx-cursor:            hand;
-    -fx-min-width:         32px;
-    -fx-pref-height:       26px;
+  -fx-background-color: #232323;
+  -fx-text-fill: -r-text-popup;
+  -fx-border-color: #3a3a3a;
+  -fx-border-radius: 4;
+  -fx-background-radius: 4;
+  -fx-font-size: 11px;
+  -fx-padding: 4 10;
+  -fx-cursor: hand;
+  -fx-min-width: 36px;
+  -fx-pref-height: 28px;
 }
 
 .reader-search-toggle:selected {
-    /* ── CHANGE background and border below for active toggle style ── */
-    -fx-background-color: rgba(192,40,74,0.25);
-    -fx-border-color:     -r-accent;
+  -fx-background-color: -r-accent-bg;
+  -fx-border-color: -r-accent;
 }
 
-/* Scope dropdown */
-.reader-search-scope {
-    -fx-background-color: #2A2A2A;
-    -fx-text-fill:        -r-text-popup;
-    -fx-font-size:        12px;
-    -fx-cursor:           hand;
-}
-
-/* Go / Close icon buttons */
 .reader-search-icon-btn {
-    -fx-background-color: transparent;
-    -fx-cursor:           hand;
-    -fx-padding:          2 6;
+  -fx-background-color: transparent;
+  -fx-cursor: hand;
+  -fx-padding: 3 8;
+  -fx-background-radius: 4;
+}
+
+.reader-search-icon-btn:hover {
+  -fx-background-color: rgba(255, 255, 255, 0.07);
 }
 
 .reader-search-icon-btn .ikonli-font-icon {
-    -fx-icon-color: -r-text-popup-muted;
+  -fx-icon-color: -r-text-popup-muted;
 }
 
 .reader-search-icon-btn:hover .ikonli-font-icon {
-    -fx-icon-color: -r-text-popup;
+  -fx-icon-color: -r-text-popup;
 }
 
-/* Result label */
 .reader-search-result-found {
-    -fx-text-fill: #4CAF50;  /* CHANGE for "match found" text color */
-    -fx-font-size: 11px;
+  -fx-text-fill: #55bb77;
+  -fx-font-size: 11px;
 }
 
 .reader-search-result-none {
-    -fx-text-fill: #FF5555;  /* CHANGE for "no matches" text color */
-    -fx-font-size: 11px;
+  -fx-text-fill: #ff5555;
+  -fx-font-size: 11px;
 }
 
-
-/* ── 10. TEXT STYLE POPUP ────────────────────────────────────────────────────
-   Floating panel, top-right corner (matches screenshot Image 1).
-   Sliders + alignment buttons + reset button.
-   ─────────────────────────────────────────────────────────────────────────── */
-
-/* Sliders */
+/* ── 9. TEXT STYLE POPUP ─────────────────────────────────────────────────────*/
 .reader-style-slider {
-    -fx-pref-width:   300px;
-    -fx-max-width:    300px;
-    /* ── CHANGE -r-accent to change slider thumb / track color ── */
-    -fx-accent:       -r-accent;
+  -fx-pref-width: 280px;
+  -fx-max-width: 280px;
+  -fx-accent: -r-accent;
 }
 
 .reader-style-slider .thumb {
-    -fx-background-color: -r-accent;
-    -fx-background-radius: 50%;
-    -fx-pref-width:  14px;
-    -fx-pref-height: 14px;
+  -fx-background-color: -r-accent;
+  -fx-background-radius: 50%;
+  -fx-pref-width: 14px;
+  -fx-pref-height: 14px;
+  -fx-effect: dropshadow(gaussian, rgba(192, 40, 74, 0.4), 6, 0, 0, 0);
 }
 
 .reader-style-slider .track {
-    -fx-background-color: rgba(192,40,74,0.35);
-    -fx-pref-height: 3px;
-    -fx-background-radius: 2;
+  -fx-background-color: rgba(192, 40, 74, 0.3);
+  -fx-pref-height: 3px;
+  -fx-background-radius: 2;
 }
 
-/* Alignment toggle buttons (4 icons: left / center / justify / right) */
 .reader-align-btn {
-    -fx-background-color:  #2A2A2A;
-    -fx-border-color:      #444444;
-    -fx-border-radius:     4;
-    -fx-background-radius: 4;
-    -fx-pref-width:        52px;
-    -fx-pref-height:       36px;
-    -fx-cursor:            hand;
+  -fx-background-color: #232323;
+  -fx-border-color: #3a3a3a;
+  -fx-border-radius: 4;
+  -fx-background-radius: 4;
+  -fx-pref-width: 52px;
+  -fx-pref-height: 34px;
+  -fx-cursor: hand;
 }
 
 .reader-align-btn:hover {
-    -fx-background-color: #333333;
+  -fx-background-color: #2e2e2e;
 }
 
 .reader-align-btn:selected {
-    /* ── CHANGE background and border below for active alignment style ── */
-    -fx-background-color: rgba(192,40,74,0.20);
-    -fx-border-color:     -r-accent;
+  -fx-background-color: -r-accent-bg;
+  -fx-border-color: -r-accent;
 }
 
 .reader-align-btn .ikonli-font-icon {
-    -fx-icon-color: #AAAAAA;
+  -fx-icon-color: #777777;
 }
 
 .reader-align-btn:selected .ikonli-font-icon {
-    -fx-icon-color: -r-accent;
+  -fx-icon-color: -r-accent;
 }
 
-/* Reset button (↺) */
 .reader-reset-btn {
-    -fx-background-color: transparent;
-    -fx-text-fill:        #AAAAAA;
-    -fx-font-size:        18px;
-    -fx-cursor:           hand;
-    -fx-padding:          0 4;
+  -fx-background-color: #232323;
+  -fx-text-fill: #888888;
+  -fx-font-size: 12px;
+  -fx-cursor: hand;
+  -fx-padding: 5 12;
+  -fx-background-radius: 4;
+  -fx-border-color: #3a3a3a;
+  -fx-border-radius: 4;
+  -fx-border-width: 1;
 }
 
 .reader-reset-btn:hover {
-    -fx-text-fill: -r-text-popup;
+  -fx-background-color: #2e2e2e;
+  -fx-text-fill: #cccccc;
 }
 
-
-/* ── 11. SCROLLBAR (inside popups) ───────────────────────────────────────────
-   ─────────────────────────────────────────────────────────────────────────── */
+/* ── 10. SCROLLBAR inside popups ─────────────────────────────────────────────*/
 .reader-scroll-pane {
-    -fx-background-color: transparent;
-    -fx-border-color:     transparent;
+  -fx-background-color: transparent;
+  -fx-border-color: transparent;
 }
 
 .reader-scroll-pane > .viewport {
-    -fx-background-color: transparent;
+  -fx-background-color: transparent;
 }
 
 .reader-scroll-pane .scroll-bar {
-    -fx-background-color: transparent;
+  -fx-background-color: transparent;
 }
 
 .reader-scroll-pane .scroll-bar .thumb {
-    -fx-background-color:  rgba(255,255,255,0.15);
-    -fx-background-radius: 4;
+  -fx-background-color: rgba(255, 255, 255, 0.12);
+  -fx-background-radius: 4;
 }
 
 .reader-scroll-pane .scroll-bar .thumb:hover {
-    -fx-background-color: rgba(255,255,255,0.25);
+  -fx-background-color: rgba(255, 255, 255, 0.22);
 }
 
 .reader-scroll-pane .scroll-bar .increment-button,
 .reader-scroll-pane .scroll-bar .decrement-button {
-    -fx-background-color: transparent;
-    -fx-padding:          0;
+  -fx-background-color: transparent;
+  -fx-padding: 0;
 }
 
 .reader-scroll-pane .scroll-bar .increment-arrow,
 .reader-scroll-pane .scroll-bar .decrement-arrow {
-    -fx-background-color: transparent;
-    -fx-shape:            "";
-    -fx-padding:          0;
+  -fx-background-color: transparent;
+  -fx-shape: "";
+  -fx-padding: 0;
 }
 
-
-/* ══════════════════════════════════════════════════════════════════════════════
-   LIGHT THEME OVERRIDE — uncomment or inject via ThemeManager to switch theme
-   ══════════════════════════════════════════════════════════════════════════════
-
-.reader-root {
-    -r-bg:             #FFFFFF;
-    -r-bg-toolbar:     #F5F5F5;
-    -r-bg-statusbar:   #FAFAFA;
-    -r-bg-popup:       #FFFFFF;
-    -r-bg-popup-item:  #F0F0F0;
-    -r-bg-popup-hover: #E8E8E8;
-    -r-text:           #1A1A1A;
-    -r-text-toolbar:   #555555;
-    -r-text-toolbar-hover: #000000;
-    -r-text-status:    #888888;
-    -r-text-popup:     #333333;
-    -r-text-popup-muted: #777777;
-    -r-border:         #E0E0E0;
-    -r-border-popup:   #DDDDDD;
-    -r-divider:        #EEEEEE;
-    -r-nav-icon:       rgba(0,0,0,0.12);
-    -r-nav-icon-hover: rgba(0,0,0,0.55);
-    -r-nav-bg-hover:   rgba(0,0,0,0.04);
+/* ── 11. WebView scroll-bar hiding ───────────────────────────────────────────
+   JavaFX WebView renders its own scroll bars via WebKit.
+   We suppress them by injecting CSS into each chapter HTML (in EpubRenderer).
+   The rule below is a safety net for the outer JavaFX scroll bar if it appears.
+   ─────────────────────────────────────────────────────────────────────────── */
+WebView .scroll-bar:vertical,
+WebView .scroll-bar:horizontal {
+  visibility: hidden;
+  -fx-pref-width: 0;
+  -fx-pref-height: 0;
 }
-
-   ══════════════════════════════════════════════════════════════════════════════
-   SEPIA THEME OVERRIDE — uncomment or inject via ThemeManager for sepia theme
-   ══════════════════════════════════════════════════════════════════════════════
-
-.reader-root {
-    -r-bg:             #F4ECD8;
-    -r-bg-toolbar:     #EDE0C8;
-    -r-bg-statusbar:   #F0E6CC;
-    -r-bg-popup:       #EDE0C8;
-    -r-bg-popup-item:  #E5D5B0;
-    -r-bg-popup-hover: #DCCFA8;
-    -r-text:           #3B2B1A;
-    -r-text-toolbar:   #7A6040;
-    -r-text-toolbar-hover: #3B2B1A;
-    -r-text-status:    #9A8060;
-    -r-text-popup:     #4A3020;
-    -r-text-popup-muted: #8A7060;
-    -r-border:         #D4C4A0;
-    -r-border-popup:   #C8B88A;
-    -r-divider:        #E0D0B0;
-    -r-nav-icon:       rgba(59,43,26,0.15);
-    -r-nav-icon-hover: rgba(59,43,26,0.5);
-    -r-nav-bg-hover:   rgba(59,43,26,0.04);
-}
-
-   ══════════════════════════════════════════════════════════════════════════════ */

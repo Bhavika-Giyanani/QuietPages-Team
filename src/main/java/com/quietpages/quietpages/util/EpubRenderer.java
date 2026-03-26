@@ -8,14 +8,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Extracts an EPUB file to a temporary directory and provides:
- * - Ordered list of chapters (spine items) with their file paths
- * - Table of contents (NavPoint tree)
- * - Page content as file:// URLs suitable for WebView
- *
- * EPUB = ZIP containing HTML/XHTML chapters + CSS + images + OPF manifest.
- * We extract everything to a temp folder and serve file:// URLs directly —
- * this means images, CSS, and fonts all load correctly in WebView.
+ * Extracts an EPUB ZIP to a temp directory and provides:
+ * - Ordered spine (chapter list) with file:// URLs for WebView
+ * - Table of contents tree
+ * - CSS-injected chapter HTML (typography only; layout/pagination handled by
+ * JS)
  */
 public class EpubRenderer {
 
@@ -24,8 +21,8 @@ public class EpubRenderer {
     public static class Chapter {
         public final String id;
         public final String title;
-        public final String filePath; // absolute path to extracted HTML file
-        public final String fileUrl; // file:// URL for WebView
+        public final String filePath;
+        public final String fileUrl;
 
         public Chapter(String id, String title, String filePath) {
             this.id = id;
@@ -42,8 +39,8 @@ public class EpubRenderer {
 
     public static class TocEntry {
         public final String title;
-        public final String src; // href within the EPUB (may include #anchor)
-        public final String resolvedUrl; // file:// URL for WebView
+        public final String src;
+        public final String resolvedUrl;
         public final List<TocEntry> children = new ArrayList<>();
         public final int playOrder;
 
@@ -60,70 +57,67 @@ public class EpubRenderer {
         }
     }
 
+    public static class ReaderTheme {
+        public String bgColor = "#0D0D0D";
+        public String textColor = "#E8E8E8";
+        public String fontFamily = "Georgia, 'Times New Roman', serif";
+        public double fontSize = 18.0;
+        public double lineHeight = 1.8;
+        public double wordSpacing = 0.0;
+        public double paragraphSpace = 1.0;
+        public String textAlign = "justify";
+        public double marginH = 40.0;
+    }
+
     // ── Fields ────────────────────────────────────────────────────────────────
 
     private final File epubFile;
     private Path extractDir;
-    private String opfDir = ""; // directory containing the OPF file inside ZIP
+    private String opfDir = "";
     private final List<Chapter> spine = new ArrayList<>();
     private final List<TocEntry> toc = new ArrayList<>();
     private String bookTitle = "";
     private boolean loaded = false;
 
-    // ── Constructor ───────────────────────────────────────────────────────────
+    // ── Constructor / API ─────────────────────────────────────────────────────
 
     public EpubRenderer(File epubFile) {
         this.epubFile = epubFile;
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    /**
-     * Extracts the EPUB and parses its structure.
-     * Call once before using any other methods.
-     */
     public void load() throws IOException {
         if (loaded)
             return;
 
-        // Create a stable temp dir named after the book file
-        String safeName = epubFile.getName().replaceAll("[^a-zA-Z0-9]", "_");
-        extractDir = Path.of(System.getProperty("java.io.tmpdir"),
-                "QuietPages_reader", safeName);
+        String safeName = epubFile.getName().replaceAll("[^a-zA-Z0-9._-]", "_");
+        extractDir = Path.of(System.getProperty("java.io.tmpdir"), "QuietPages_reader", safeName);
         Files.createDirectories(extractDir);
 
-        // Extract ZIP contents
         try (ZipFile zip = new ZipFile(epubFile)) {
-            Enumeration<? extends ZipEntry> entries = zip.entries();
-            while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
+            for (Enumeration<? extends ZipEntry> en = zip.entries(); en.hasMoreElements();) {
+                ZipEntry entry = en.nextElement();
                 Path dest = extractDir.resolve(entry.getName()).normalize();
                 if (!dest.startsWith(extractDir))
-                    continue; // zip slip protection
+                    continue;
                 if (entry.isDirectory()) {
                     Files.createDirectories(dest);
-                } else {
-                    Files.createDirectories(dest.getParent());
-                    try (InputStream is = zip.getInputStream(entry)) {
-                        Files.write(dest, is.readAllBytes(),
-                                StandardOpenOption.CREATE,
-                                StandardOpenOption.TRUNCATE_EXISTING);
-                    }
+                    continue;
+                }
+                Files.createDirectories(dest.getParent());
+                try (InputStream is = zip.getInputStream(entry)) {
+                    Files.write(dest, is.readAllBytes(),
+                            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                 }
             }
         }
 
-        // Parse structure
         String opfPath = findOpfPath();
         if (opfPath != null) {
-            opfDir = opfPath.contains("/")
-                    ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1)
-                    : "";
-            String opfContent = readFile(extractDir.resolve(opfPath));
-            parseOpf(opfContent);
-            parseToc(opfContent);
+            opfDir = opfPath.contains("/") ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : "";
+            String opf = readFile(extractDir.resolve(opfPath));
+            parseOpf(opf);
+            parseToc(opf);
         }
-
         loaded = true;
     }
 
@@ -143,149 +137,140 @@ public class EpubRenderer {
         return loaded;
     }
 
-    /**
-     * Returns the file:// URL for a given spine index.
-     */
-    public String getChapterUrl(int spineIndex) {
-        if (spineIndex < 0 || spineIndex >= spine.size())
+    public int getTotalChapters() {
+        return spine.size();
+    }
+
+    public String getChapterUrl(int i) {
+        if (i < 0 || i >= spine.size())
             return null;
-        return spine.get(spineIndex).fileUrl;
+        return spine.get(i).fileUrl;
     }
 
     /**
-     * Finds which spine index contains the given file URL (ignoring anchors).
+     * Returns a file:// URL for a CSS-injected copy of the chapter HTML.
+     * The copy lives in the SAME directory as the source so relative image/CSS
+     * paths resolve correctly when WebView loads it.
      */
+    public String getChapterUrlWithTheme(int i, ReaderTheme t) throws IOException {
+        if (i < 0 || i >= spine.size())
+            return null;
+        Chapter ch = spine.get(i);
+        Path orig = Path.of(ch.filePath);
+        String html = readFile(orig);
+
+        // Remove any previous QP injection
+        html = html.replaceAll(
+                "(?s)<style[^>]+id=['\"]qp-reader-style['\"][^>]*>.*?</style>", "");
+
+        String css = buildTypographyCss(t);
+        String injection = "<style id=\"qp-reader-style\">\n" + css + "\n</style>";
+
+        if (html.contains("</head>"))
+            html = html.replace("</head>", injection + "\n</head>");
+        else if (html.contains("<head>"))
+            html = html.replace("<head>", "<head>\n" + injection);
+        else
+            html = injection + "\n" + html;
+
+        // Write into same folder so relative URLs still resolve
+        Path themed = orig.getParent().resolve("_qp_" + i + ".html");
+        Files.writeString(themed, html, StandardCharsets.UTF_8);
+        return themed.toFile().toURI().toString();
+    }
+
     public int findSpineIndex(String fileUrl) {
-        String base = fileUrl.split("#")[0];
+        if (fileUrl == null)
+            return 0;
+        // Strip _qp_N.html if querying a themed copy
+        String base = fileUrl.split("#")[0].replaceAll("_qp_\\d+\\.html$", "");
         for (int i = 0; i < spine.size(); i++) {
-            if (spine.get(i).fileUrl.equals(base))
+            String sb = spine.get(i).fileUrl.split("#")[0];
+            if (sb.equals(base) || sb.contains(base) || base.contains(sb))
                 return i;
         }
         return 0;
     }
 
-    public int getTotalChapters() {
-        return spine.size();
-    }
-
-    /**
-     * Injects a reader stylesheet into a chapter HTML file so we can control
-     * font, colors, margins, line-height etc. without modifying the EPUB.
-     * Returns the injected content as a data: URL.
-     */
-    public String getChapterUrlWithTheme(int spineIndex, ReaderTheme theme) throws IOException {
-        if (spineIndex < 0 || spineIndex >= spine.size())
-            return null;
-        Chapter ch = spine.get(spineIndex);
-        String html = readFile(Path.of(ch.filePath));
-
-        // Inject our CSS just before </head>
-        String css = buildReaderCss(theme);
-        String injection = "<style id='qp-reader-style'>" + css + "</style>";
-
-        if (html.contains("</head>")) {
-            html = html.replace("</head>", injection + "</head>");
-        } else {
-            html = injection + html;
-        }
-
-        // Return as a data URL so WebView doesn't need to reload from disk
-        // BUT we need the base URL to be the chapter file so relative
-        // paths (images, CSS) resolve correctly.
-        // We write the modified HTML back to a temp file instead.
-        Path themed = extractDir.resolve("_themed_" + spineIndex + ".html");
-        Files.writeString(themed, html, StandardCharsets.UTF_8);
-        return themed.toFile().toURI().toString();
-    }
-
     public void cleanup() {
         if (extractDir != null) {
             try {
-                deleteDirectory(extractDir);
+                deleteDir(extractDir);
             } catch (IOException ignored) {
             }
         }
     }
 
-    // ── Parsing ───────────────────────────────────────────────────────────────
+    // ── OPF parsing ───────────────────────────────────────────────────────────
 
     private String findOpfPath() throws IOException {
-        Path container = extractDir.resolve("META-INF/container.xml");
-        if (!Files.exists(container))
+        Path c = extractDir.resolve("META-INF/container.xml");
+        if (!Files.exists(c))
             return null;
-        String content = readFile(container);
-        int idx = content.indexOf("full-path=\"");
-        if (idx < 0)
+        String xml = readFile(c);
+        int i = xml.indexOf("full-path=\"");
+        if (i < 0)
             return null;
-        int start = idx + 11;
-        int end = content.indexOf('"', start);
-        return end > start ? content.substring(start, end) : null;
+        int s = i + 11, e = xml.indexOf('"', s);
+        return e > s ? xml.substring(s, e) : null;
     }
 
     private void parseOpf(String opf) {
-        // Book title
-        bookTitle = tagValue(opf, "dc:title", epubFile.getName());
+        bookTitle = tagVal(opf, "dc:title", epubFile.getName());
 
-        // Build id→href map from manifest
-        Map<String, String> idToHref = new LinkedHashMap<>();
-        Map<String, String> idToMediaType = new HashMap<>();
+        Map<String, String> idHref = new LinkedHashMap<>();
+        Map<String, String> idMime = new HashMap<>();
         String manifest = block(opf, "<manifest", "</manifest>");
         if (manifest != null) {
             for (String item : manifest.split("<item ")) {
-                String id = attr(item, "id");
-                String href = attr(item, "href");
-                String mediaType = attr(item, "media-type");
+                String id = attr(item, "id"), href = attr(item, "href"), mt = attr(item, "media-type");
                 if (id != null && href != null) {
-                    idToHref.put(id, href);
-                    if (mediaType != null)
-                        idToMediaType.put(id, mediaType);
+                    idHref.put(id, href);
+                    if (mt != null)
+                        idMime.put(id, mt);
                 }
             }
         }
 
-        // Walk spine to build ordered chapter list
         String spineBlock = block(opf, "<spine", "</spine>");
         if (spineBlock != null) {
-            String[] items = spineBlock.split("<itemref ");
-            for (String item : items) {
+            for (String item : spineBlock.split("<itemref ")) {
                 String idref = attr(item, "idref");
                 if (idref == null)
                     continue;
-                String href = idToHref.get(idref);
+                String href = idHref.get(idref);
                 if (href == null)
                     continue;
-                String mediaType = idToMediaType.getOrDefault(idref, "");
-                if (!mediaType.contains("html") && !mediaType.contains("xhtml")
-                        && !href.toLowerCase().endsWith(".html")
-                        && !href.toLowerCase().endsWith(".xhtml")
-                        && !href.toLowerCase().endsWith(".htm"))
+                String mt = idMime.getOrDefault(idref, "");
+                String lh = href.toLowerCase();
+                if (!mt.contains("html") && !mt.contains("xhtml")
+                        && !lh.endsWith(".html") && !lh.endsWith(".xhtml") && !lh.endsWith(".htm"))
                     continue;
-
-                Path absPath = extractDir.resolve(opfDir + href).normalize();
-                if (Files.exists(absPath)) {
-                    spine.add(new Chapter(idref, titleFromHref(href),
-                            absPath.toString()));
+                String decoded = href;
+                try {
+                    decoded = java.net.URLDecoder.decode(href, StandardCharsets.UTF_8);
+                } catch (Exception ignored) {
                 }
+                Path abs = extractDir.resolve(opfDir + decoded).normalize();
+                if (Files.exists(abs))
+                    spine.add(new Chapter(idref, nameFromHref(href), abs.toString()));
             }
         }
     }
 
     private void parseToc(String opf) {
-        // Try EPUB3 nav.xhtml first, then fall back to EPUB2 ncx
         String navHref = findNavHref(opf);
         if (navHref != null) {
             Path navPath = extractDir.resolve(opfDir + navHref).normalize();
             if (Files.exists(navPath)) {
                 try {
                     parseNavXhtml(readFile(navPath), navPath.getParent());
-                    if (!toc.isEmpty())
-                        return;
                 } catch (IOException ignored) {
                 }
+                if (!toc.isEmpty())
+                    return;
             }
         }
-
-        // EPUB2 NCX
         String ncxHref = findNcxHref(opf);
         if (ncxHref != null) {
             Path ncxPath = extractDir.resolve(opfDir + ncxHref).normalize();
@@ -296,207 +281,268 @@ public class EpubRenderer {
                 }
             }
         }
-
-        // Fallback: use spine as TOC
         if (toc.isEmpty()) {
-            for (int i = 0; i < spine.size(); i++) {
-                Chapter ch = spine.get(i);
-                toc.add(new TocEntry(ch.title, ch.filePath, ch.fileUrl, i));
-            }
+            for (int i = 0; i < spine.size(); i++)
+                toc.add(new TocEntry(spine.get(i).title, spine.get(i).filePath, spine.get(i).fileUrl, i));
         }
     }
 
     private String findNavHref(String opf) {
-        String manifest = block(opf, "<manifest", "</manifest>");
-        if (manifest == null)
+        String m = block(opf, "<manifest", "</manifest>");
+        if (m == null)
             return null;
-        for (String item : manifest.split("<item ")) {
-            String props = attr(item, "properties");
-            if (props != null && props.contains("nav")) {
+        for (String item : m.split("<item ")) {
+            String p = attr(item, "properties");
+            if (p != null && p.contains("nav"))
                 return attr(item, "href");
-            }
         }
         return null;
     }
 
     private String findNcxHref(String opf) {
-        String manifest = block(opf, "<manifest", "</manifest>");
-        if (manifest == null)
+        String m = block(opf, "<manifest", "</manifest>");
+        if (m == null)
             return null;
-        for (String item : manifest.split("<item ")) {
+        for (String item : m.split("<item ")) {
             String mt = attr(item, "media-type");
             if (mt != null && mt.contains("ncx"))
                 return attr(item, "href");
         }
-        // Fallback: look for .ncx extension
-        if (manifest != null) {
-            for (String item : manifest.split("<item ")) {
-                String href = attr(item, "href");
-                if (href != null && href.endsWith(".ncx"))
-                    return href;
+        if (m != null) {
+            for (String item : m.split("<item ")) {
+                String h = attr(item, "href");
+                if (h != null && h.endsWith(".ncx"))
+                    return h;
             }
         }
         return null;
     }
 
-    private void parseNavXhtml(String html, Path baseDir) {
-        // Find <nav epub:type="toc"> block
+    private void parseNavXhtml(String html, Path base) {
         int navStart = html.indexOf("epub:type=\"toc\"");
         if (navStart < 0)
             navStart = html.indexOf("epub:type='toc'");
         if (navStart < 0)
+            navStart = html.indexOf("<nav");
+        if (navStart < 0)
             return;
-
         int olStart = html.indexOf("<ol", navStart);
         if (olStart < 0)
             return;
-
-        // Find matching closing </ol>
-        int depth = 0, pos = olStart;
-        int olEnd = -1;
+        int depth = 0, pos = olStart, olEnd = -1;
         while (pos < html.length()) {
             if (html.startsWith("<ol", pos)) {
                 depth++;
                 pos += 3;
             } else if (html.startsWith("</ol>", pos)) {
-                depth--;
-                if (depth == 0) {
+                if (--depth == 0) {
                     olEnd = pos + 5;
                     break;
                 }
                 pos += 5;
-            } else {
+            } else
                 pos++;
-            }
         }
         if (olEnd < 0)
             return;
-
-        String olBlock = html.substring(olStart, olEnd);
-        parseNavOl(olBlock, baseDir, toc, new int[] { 0 });
+        parseNavOl(html.substring(olStart, olEnd), base, toc, new int[] { 0 });
     }
 
-    private void parseNavOl(String ol, Path baseDir,
-            List<TocEntry> target, int[] counter) {
-        String[] liParts = ol.split("<li[^>]*>");
-        for (String li : liParts) {
+    private void parseNavOl(String ol, Path base, List<TocEntry> target, int[] ctr) {
+        for (String li : ol.split("<li[^>]*>")) {
             if (li.isBlank())
                 continue;
             String href = attr(li, "href");
-            String label = stripTags(li.split("</a>")[0]).trim();
+            String label = stripTags(li.contains("</a>") ? li.split("</a>")[0] : li).trim();
             if (label.isBlank())
                 continue;
-
             String resolved = "";
             if (href != null && !href.isEmpty()) {
-                String bareHref = href.split("#")[0];
-                Path absPath = baseDir.resolve(bareHref).normalize();
-                if (Files.exists(absPath)) {
-                    resolved = absPath.toFile().toURI().toString();
+                String bare = href.split("#")[0];
+                try {
+                    bare = java.net.URLDecoder.decode(bare, StandardCharsets.UTF_8);
+                } catch (Exception ignored) {
+                }
+                Path abs = base.resolve(bare).normalize();
+                if (Files.exists(abs)) {
+                    resolved = abs.toFile().toURI().toString();
                     if (href.contains("#"))
                         resolved += "#" + href.split("#")[1];
                 }
             }
-
-            TocEntry entry = new TocEntry(label, href != null ? href : "",
-                    resolved, counter[0]++);
+            TocEntry entry = new TocEntry(label, href != null ? href : "", resolved, ctr[0]++);
             target.add(entry);
-
-            // Nested <ol>
-            int nestedOl = li.indexOf("<ol");
-            if (nestedOl >= 0) {
-                parseNavOl(li.substring(nestedOl), baseDir,
-                        entry.children, counter);
-            }
+            int nested = li.indexOf("<ol");
+            if (nested >= 0)
+                parseNavOl(li.substring(nested), base, entry.children, ctr);
         }
     }
 
-    private void parseNcx(String ncx, Path baseDir) {
-        String[] points = ncx.split("<navPoint ");
+    private void parseNcx(String ncx, Path base) {
         int order = 0;
-        for (String pt : points) {
-            if (!pt.contains("<navLabel>") && !pt.contains("<text>"))
+        for (String pt : ncx.split("<navPoint ")) {
+            if (!pt.contains("<text>"))
                 continue;
-            String label = tagValue(pt, "text", "");
+            String label = tagVal(pt, "text", "");
             String src = attr(pt.contains("<content") ? pt.substring(pt.indexOf("<content")) : "", "src");
             if (label.isBlank())
                 continue;
-
             String resolved = "";
             if (src != null && !src.isEmpty()) {
-                String bareSrc = src.split("#")[0];
-                Path absPath = baseDir.resolve(bareSrc).normalize();
-                if (Files.exists(absPath)) {
-                    resolved = absPath.toFile().toURI().toString();
+                String bare = src.split("#")[0];
+                try {
+                    bare = java.net.URLDecoder.decode(bare, StandardCharsets.UTF_8);
+                } catch (Exception ignored) {
+                }
+                Path abs = base.resolve(bare).normalize();
+                if (Files.exists(abs)) {
+                    resolved = abs.toFile().toURI().toString();
                     if (src.contains("#"))
                         resolved += "#" + src.split("#")[1];
                 }
             }
-            toc.add(new TocEntry(label, src != null ? src : "",
-                    resolved, order++));
+            toc.add(new TocEntry(label, src != null ? src : "", resolved, order++));
         }
     }
 
-    // ── Theme / CSS injection ─────────────────────────────────────────────────
+    // ── CSS ───────────────────────────────────────────────────────────────────
 
-    public static class ReaderTheme {
-        public String bgColor = "#0D0D0D";
-        public String textColor = "#E8E8E8";
-        public String fontFamily = "Georgia, 'Times New Roman', serif";
-        public double fontSize = 18.0; // px
-        public double lineHeight = 1.8;
-        public double wordSpacing = 0.0; // em
-        public double paragraphSpace = 1.0; // em (margin-bottom on p)
-        public String textAlign = "justify";
-        public double marginH = 48.0; // px left+right margin per column
-    }
-
-    private String buildReaderCss(ReaderTheme t) {
+    /**
+     * Typography-only CSS.
+     * DOES NOT set: width, height, overflow, column-count, padding, margin on
+     * body/html.
+     * Those are all controlled by the JS pagination script in ReaderController
+     * after the WebView has been physically measured.
+     */
+    private String buildTypographyCss(ReaderTheme t) {
         return String.format("""
-                html, body {
-                    background-color: %s !important;
-                    color: %s !important;
-                    font-family: %s !important;
-                    font-size: %.1fpx !important;
-                    line-height: %.2f !important;
-                    word-spacing: %.2fem !important;
-                    margin: 0 !important;
-                    padding: 0 %.0fpx !important;
+                /* ── QP Reader — typography only ─────────────── */
+                * {
+                    box-sizing: border-box !important;
                     -webkit-text-size-adjust: none !important;
                 }
-                p, div, span, li, td, th, blockquote {
-                    color: %s !important;
-                    text-align: %s !important;
+                html, body {
+                    background-color: %s !important;
+                }
+                body {
+                    color:        %s !important;
+                    font-family:  %s !important;
+                    font-size:    %.1fpx !important;
+                    line-height:  %.2f !important;
+                    word-spacing: %.3fem !important;
+                }
+                p {
+                    color:         %s !important;
+                    text-align:    %s !important;
+                    margin-top:    0 !important;
                     margin-bottom: %.2fem !important;
+                    orphans: 3 !important;
+                    widows:  3 !important;
+                }
+                span, li, td, th, div, section, article {
+                    color: %s !important;
                 }
                 a { color: #C0284A !important; text-decoration: none !important; }
-                img { max-width: 100%% !important; height: auto !important; display: block;
-                      margin: 1em auto !important; }
-                h1,h2,h3,h4,h5,h6 {
-                    color: %s !important;
-                    margin-top: 1.2em !important;
+
+                /* ── Images: contained, never split across column boundary ── */
+                img {
+                    display:    block !important;
+                    max-width:  100%% !important;
+                    max-height: 80vh !important;
+                    width:      auto !important;
+                    height:     auto !important;
+                    object-fit: contain !important;
+                    margin:     1em auto !important;
+                    -webkit-column-break-inside: avoid !important;
+                    break-inside:            avoid !important;
+                    page-break-inside:       avoid !important;
+                }
+                figure {
+                    margin: 0.8em 0 !important;
+                    text-align: center !important;
+                    -webkit-column-break-inside: avoid !important;
+                    break-inside:            avoid !important;
+                }
+                figcaption {
+                    font-size:  0.82em !important;
+                    color:      #888 !important;
+                    text-align: center !important;
+                    margin-top: 0.3em !important;
+                }
+                svg {
+                    max-width:  100%% !important;
+                    max-height: 80vh !important;
+                    -webkit-column-break-inside: avoid !important;
+                    break-inside: avoid !important;
+                }
+
+                /* ── Headings ────────────────────────────────── */
+                h1, h2, h3, h4, h5, h6 {
+                    color:       %s !important;
+                    font-family: %s !important;
+                    line-height: 1.25 !important;
+                    margin-top:    1.2em !important;
                     margin-bottom: 0.4em !important;
+                    -webkit-column-break-after: avoid !important;
+                    break-after: avoid !important;
+                }
+                h1 { font-size: 1.55em !important; }
+                h2 { font-size: 1.28em !important; }
+                h3 { font-size: 1.10em !important; }
+
+                /* ── Block elements that must not split ───────── */
+                table, pre, blockquote {
+                    -webkit-column-break-inside: avoid !important;
+                    break-inside: avoid !important;
+                }
+                blockquote {
+                    border-left:  3px solid #C0284A !important;
+                    margin-left:  0 !important;
+                    padding-left: 1em !important;
+                    color:        #AAAAAA !important;
+                    font-style:   italic !important;
+                }
+                pre, code {
+                    background:    rgba(255,255,255,0.06) !important;
+                    border-radius: 3px !important;
+                    padding:       0.15em 0.4em !important;
+                    font-size:     0.87em !important;
+                }
+                hr {
+                    border:     none !important;
+                    border-top: 1px solid rgba(255,255,255,0.08) !important;
+                    margin:     2em auto !important;
+                    width:      35%% !important;
+                }
+                table { width: 100%% !important; border-collapse: collapse !important; }
+                td, th {
+                    border:  1px solid rgba(255,255,255,0.1) !important;
+                    padding: 0.35em 0.6em !important;
+                    color:   %s !important;
                 }
                 """,
-                t.bgColor, t.textColor, t.fontFamily, t.fontSize,
-                t.lineHeight, t.wordSpacing, t.marginH,
-                t.textColor, t.textAlign, t.paragraphSpace,
-                t.textColor);
+                t.bgColor, // html,body bg
+                t.textColor, t.fontFamily, t.fontSize, // body
+                t.lineHeight, t.wordSpacing,
+                t.textColor, t.textAlign, t.paragraphSpace, // p
+                t.textColor, // span etc
+                t.textColor, t.fontFamily, // headings
+                t.textColor); // td
     }
 
-    // ── XML/HTML helpers ──────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String readFile(Path p) throws IOException {
         byte[] bytes = Files.readAllBytes(p);
-        // Try UTF-8, fall back to ISO-8859-1
-        try {
-            return new String(bytes, StandardCharsets.UTF_8);
-        } catch (Exception e) {
+        String preview = new String(bytes, 0, Math.min(600, bytes.length), StandardCharsets.UTF_8);
+        if (preview.contains("charset=\"iso-8859") || preview.contains("charset=iso-8859"))
             return new String(bytes, StandardCharsets.ISO_8859_1);
-        }
+        if (preview.contains("charset=\"windows-1252") || preview.contains("charset=windows-1252"))
+            return new String(bytes, "windows-1252");
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    private String tagValue(String xml, String tag, String def) {
+    private String tagVal(String xml, String tag, String def) {
         int s = xml.indexOf('<' + tag);
         if (s < 0)
             return def;
@@ -516,39 +562,34 @@ public class EpubRenderer {
             int idx = tag.indexOf(search);
             if (idx < 0)
                 continue;
-            int start = idx + search.length();
-            int end = tag.indexOf(q, start);
-            if (end > start)
-                return tag.substring(start, end);
+            int s = idx + search.length(), e = tag.indexOf(q, s);
+            if (e > s)
+                return tag.substring(s, e);
         }
         return null;
     }
 
-    private String block(String xml, String startTag, String endTag) {
-        int s = xml.indexOf(startTag);
-        int e = xml.indexOf(endTag, s);
+    private String block(String xml, String start, String end) {
+        int s = xml.indexOf(start), e = xml.indexOf(end, s);
         if (s < 0 || e < 0)
             return null;
-        return xml.substring(s, e + endTag.length());
+        return xml.substring(s, e + end.length());
     }
 
     private String stripTags(String html) {
-        return html.replaceAll("<[^>]+>", "").trim();
+        return html.replaceAll("<[^>]+>", "").replaceAll("&[a-zA-Z#\\d]+;", " ").trim();
     }
 
-    private String titleFromHref(String href) {
-        String name = href.contains("/") ? href.substring(href.lastIndexOf('/') + 1) : href;
-        if (name.contains("."))
-            name = name.substring(0, name.lastIndexOf('.'));
-        return name.replace('-', ' ').replace('_', ' ');
+    private String nameFromHref(String href) {
+        String n = href.contains("/") ? href.substring(href.lastIndexOf('/') + 1) : href;
+        if (n.contains("."))
+            n = n.substring(0, n.lastIndexOf('.'));
+        return n.replace('-', ' ').replace('_', ' ');
     }
 
-    private void deleteDirectory(Path dir) throws IOException {
+    private void deleteDir(Path dir) throws IOException {
         if (!Files.exists(dir))
             return;
-        Files.walk(dir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete);
+        Files.walk(dir).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
     }
 }

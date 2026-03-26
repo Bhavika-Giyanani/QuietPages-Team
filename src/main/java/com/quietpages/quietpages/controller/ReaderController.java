@@ -16,30 +16,31 @@ import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.*;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
+import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.kordamp.ikonli.javafx.FontIcon;
 
 import java.io.File;
 import java.sql.PreparedStatement;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * ReaderController — drives reader-view.fxml.
+ * ReaderController — CSS multi-column paginated EPUB reader.
  *
- * Architecture:
- * - EpubRenderer extracts the EPUB ZIP to a temp folder and serves file://
- * URLs.
- * - Two WebViews (left + right) show adjacent spine items (two-page spread).
- * - CSS is injected into each chapter HTML so our reader theme controls
- * fonts/colors.
- * - Page navigation: keyboard LEFT/RIGHT, scroll wheel, or on-screen arrows.
- * - TOC panel overlays on the left; Search and Text Style float top-right.
- * - All popup panels are built in code (not FXML) so they can be toggled
- * easily.
+ * ONE WebView fills the entire reading area.
+ * The chapter body gets column-count:2 via JS after the WebView has been
+ * measured, so we know the exact pixel viewport dimensions.
+ *
+ * Spreads: every viewportWidth of horizontal content = one spread (left+right
+ * page).
+ * Turning a page = scrolling html.scrollLeft by ±viewportWidth.
+ * Reaching the last spread of a chapter → loads next chapter automatically.
  */
 public class ReaderController {
 
-    // ── FXML injections ───────────────────────────────────────────────────────
+    // ── FXML ─────────────────────────────────────────────────────────────────
     @FXML
     private BorderPane readerRoot;
     @FXML
@@ -49,7 +50,7 @@ public class ReaderController {
     @FXML
     private Label lblBookTitle;
     @FXML
-    private Button btnToc;
+    private Button btnToc; // moved to LEFT in FXML
     @FXML
     private Button btnSearch;
     @FXML
@@ -71,49 +72,49 @@ public class ReaderController {
     @FXML
     private Label lblProgress;
 
-    // ── WebViews (built in code so we control sizing precisely) ───────────────
-    private WebView leftWebView;
-    private WebView rightWebView;
-    private WebEngine leftEngine;
-    private WebEngine rightEngine;
+    // ── WebView ───────────────────────────────────────────────────────────────
+    private WebView webView;
+    private WebEngine engine;
 
-    // ── Reader state ──────────────────────────────────────────────────────────
+    // ── State ─────────────────────────────────────────────────────────────────
     private Book book;
     private EpubRenderer renderer;
     private ReaderTheme theme = new ReaderTheme();
-    private int currentIndex = 0; // spine index of left page
+    private int spineIndex = 0;
     private int totalChapters = 0;
+    private int currentSpread = 0;
+    private int totalSpreads = 1;
     private boolean fullscreen = false;
     private Runnable onBackCallback;
 
-    // Popup panel IDs (used to find and remove them from readerStack)
-    private static final String ID_TOC = "qp-toc-panel";
+    /** Guards concurrent page-turn attempts */
+    private final AtomicBoolean turning = new AtomicBoolean(false);
+    /** Spread to jump to after next chapter load (Integer.MAX_VALUE = last) */
+    private final AtomicInteger jumpSpread = new AtomicInteger(0);
+    /** True while layout JS is pending — prevents button navigation races */
+    private volatile boolean layoutPending = false;
+
+    private Popup tocPopup;
     private static final String ID_SEARCH = "qp-search-popup";
     private static final String ID_STYLE = "qp-style-popup";
+
+    // Gap between left and right page columns (visible gutter)
+    private static final double COLUMN_GAP = 48.0;
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
     public void initialize() {
-        buildWebViews();
-        setupKeyAndScrollNav();
+        buildWebView();
+        setupNav();
     }
 
-    // ── Public entry point (called by HelloController) ────────────────────────
-
-    /**
-     * Opens the given book in the reader.
-     * 
-     * @param book   the Book to open
-     * @param onBack callback fired when user presses the back button
-     */
+    // ── Entry point ───────────────────────────────────────────────────────────
     public void openBook(Book book, Runnable onBack) {
         this.book = book;
         this.onBackCallback = onBack;
-
         lblBookTitle.setText(book.getTitle());
         setWindowTitle(book.getTitle() + " — QuietPages");
 
-        // Load EPUB on background thread — never block the UI thread
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -124,130 +125,379 @@ public class ReaderController {
         };
         task.setOnSucceeded(e -> Platform.runLater(() -> {
             totalChapters = renderer.getTotalChapters();
-            // Restore last reading position
-            currentIndex = (int) (book.getReadingProgress() * Math.max(1, totalChapters));
-            currentIndex = Math.max(0, Math.min(currentIndex, totalChapters - 1));
-            // Make sure left page is always even-indexed for clean spreads
-            if (currentIndex % 2 != 0)
-                currentIndex = Math.max(0, currentIndex - 1);
-            loadSpread();
+            double progress = book.getReadingProgress();
+            spineIndex = Math.max(0, Math.min(
+                    (int) (progress * Math.max(1, totalChapters)),
+                    totalChapters - 1));
+            jumpSpread.set(0);
+            loadChapter(spineIndex, 0);
         }));
-        task.setOnFailed(
-                e -> Platform.runLater(() -> showError("Could not open book: " + task.getException().getMessage())));
+        task.setOnFailed(e -> Platform.runLater(
+                () -> showError("Could not open: " + task.getException().getMessage())));
         new Thread(task, "epub-loader").start();
     }
 
-    // ── WebView construction ──────────────────────────────────────────────────
+    // ── WebView ───────────────────────────────────────────────────────────────
+    private void buildWebView() {
+        webView = new WebView();
+        engine = webView.getEngine();
+        webView.setContextMenuEnabled(false);
+        webView.setMaxWidth(Double.MAX_VALUE);
+        webView.setMaxHeight(Double.MAX_VALUE);
+        HBox.setHgrow(webView, Priority.ALWAYS);
+        webViewContainer.getChildren().add(webView);
 
-    private void buildWebViews() {
-        leftWebView = new WebView();
-        rightWebView = new WebView();
-        leftEngine = leftWebView.getEngine();
-        rightEngine = rightWebView.getEngine();
+        // When a chapter finishes loading, inject the column layout
+        engine.documentProperty().addListener((obs, oldDoc, newDoc) -> {
+            if (newDoc == null)
+                return;
+            layoutPending = true;
+            turning.set(false);
+            // Give WebKit one frame to finish basic rendering, then inject
+            Platform.runLater(() -> injectColumnLayout(jumpSpread.get()));
+        });
 
-        // Disable right-click context menus inside the WebViews
-        leftWebView.setContextMenuEnabled(false);
-        rightWebView.setContextMenuEnabled(false);
+        // JS → Java status bridge
+        engine.setOnStatusChanged(evt -> {
+            String data = evt.getData();
+            if (data == null)
+                return;
+            Platform.runLater(() -> handleStatus(data));
+        });
 
-        // Both columns grow equally to fill the window width
-        HBox.setHgrow(leftWebView, Priority.ALWAYS);
-        HBox.setHgrow(rightWebView, Priority.ALWAYS);
-        leftWebView.setMaxWidth(Double.MAX_VALUE);
-        rightWebView.setMaxWidth(Double.MAX_VALUE);
-
-        // Thin 1px divider line between the pages
-        Region divider = new Region();
-        divider.getStyleClass().add("reader-page-divider");
-        divider.setMinWidth(1);
-        divider.setMaxWidth(1);
-
-        webViewContainer.getChildren().addAll(leftWebView, divider, rightWebView);
-
-        // Update breadcrumb/progress whenever left page finishes loading
-        leftEngine.documentProperty().addListener(
-                (obs, o, n) -> {
-                    if (n != null)
-                        Platform.runLater(this::updateStatusBar);
-                });
-    }
-
-    private void setupKeyAndScrollNav() {
-        // StackPane must be focusable to receive key events
-        readerStack.setFocusTraversable(true);
-
-        // Click on the reading area to give it focus (so keys work)
-        readerStack.setOnMouseClicked(e -> {
-            // Only steal focus if not clicking a popup
-            if (e.getTarget() == readerStack || e.getTarget() instanceof WebView) {
-                readerStack.requestFocus();
+        // Re-apply column layout when window is resized
+        webView.widthProperty().addListener((obs, ov, nv) -> {
+            if (renderer != null && !layoutPending) {
+                layoutPending = true;
+                Platform.runLater(() -> injectColumnLayout(currentSpread));
             }
         });
-
-        // Keyboard navigation — LEFT/RIGHT arrows and Page Up/Down
-        readerStack.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP)
-                onPrevPage();
-            if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN)
-                onNextPage();
-        });
-
-        // Mouse scroll — forward = next pages, backward = previous pages
-        // Applied to both WebViews so scrolling anywhere in the text flips pages
-        leftWebView.addEventFilter(ScrollEvent.SCROLL, e -> {
-            if (e.getDeltaY() < 0)
-                onNextPage();
-            else if (e.getDeltaY() > 0)
-                onPrevPage();
-            e.consume(); // prevent WebView from scrolling internally
-        });
-        rightWebView.addEventFilter(ScrollEvent.SCROLL, e -> {
-            if (e.getDeltaY() < 0)
-                onNextPage();
-            else if (e.getDeltaY() > 0)
-                onPrevPage();
-            e.consume();
+        webView.heightProperty().addListener((obs, ov, nv) -> {
+            if (renderer != null && !layoutPending) {
+                layoutPending = true;
+                Platform.runLater(() -> injectColumnLayout(currentSpread));
+            }
         });
     }
 
-    // ── Page loading ──────────────────────────────────────────────────────────
-
-    /**
-     * Loads the current two-page spread.
-     * Left page = spine[currentIndex]
-     * Right page = spine[currentIndex + 1] (or blank if last chapter)
-     */
-    private void loadSpread() {
-        if (renderer == null || totalChapters == 0)
-            return;
-        currentIndex = Math.max(0, Math.min(currentIndex, totalChapters - 1));
-
-        try {
-            // Left page
-            String leftUrl = renderer.getChapterUrlWithTheme(currentIndex, theme);
-            leftEngine.load(leftUrl);
-
-            // Right page — if there is a next chapter, show it; otherwise show blank
-            if (currentIndex + 1 < totalChapters) {
-                String rightUrl = renderer.getChapterUrlWithTheme(currentIndex + 1, theme);
-                rightEngine.load(rightUrl);
-            } else {
-                rightEngine.loadContent(blankPage());
+    private void handleStatus(String data) {
+        if (data.startsWith("qp:layout:")) {
+            // format: qp:layout:<totalSpreads>:<landedSpread>
+            String[] p = data.split(":");
+            if (p.length >= 4) {
+                try {
+                    totalSpreads = Integer.parseInt(p[2]);
+                    currentSpread = Integer.parseInt(p[3]);
+                } catch (NumberFormatException ignored) {
+                }
             }
-
+            layoutPending = false;
+            turning.set(false);
             updateStatusBar();
             persistProgress();
+            webView.setOpacity(1);
 
+        } else if (data.startsWith("qp:turned:")) {
+            // format: qp:turned:<newSpread>
+            try {
+                currentSpread = Integer.parseInt(data.split(":")[2]);
+            } catch (NumberFormatException ignored) {
+            }
+            layoutPending = false;
+            turning.set(false);
+            updateStatusBar();
+
+        } else if ("qp:next-chapter".equals(data)) {
+            // JS confirmed we are past the last spread → advance chapter
+            if (spineIndex + 1 < totalChapters) {
+                spineIndex++;
+                persistProgress();
+                loadChapter(spineIndex, 0);
+            } else {
+                turning.set(false);
+                layoutPending = false;
+            }
+
+        } else if ("qp:prev-chapter".equals(data)) {
+            if (spineIndex > 0) {
+                spineIndex--;
+                persistProgress();
+                loadChapter(spineIndex, Integer.MAX_VALUE);
+            } else {
+                turning.set(false);
+                layoutPending = false;
+            }
+        }
+    }
+
+    private void setupNav() {
+        readerStack.setFocusTraversable(true);
+        readerStack.setOnMouseClicked(e -> readerStack.requestFocus());
+        readerStack.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN)
+                doNextSpread();
+            if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP)
+                doPrevSpread();
+        });
+        webView.addEventFilter(ScrollEvent.SCROLL, e -> {
+            e.consume();
+            double d = Math.abs(e.getDeltaY()) >= Math.abs(e.getDeltaX())
+                    ? e.getDeltaY()
+                    : -e.getDeltaX();
+            if (d < 0)
+                doNextSpread();
+            else
+                doPrevSpread();
+        });
+    }
+
+    // ── Chapter loading ───────────────────────────────────────────────────────
+
+    private void loadChapter(int index, int targetSpread) {
+        if (renderer == null)
+            return;
+        index = Math.max(0, Math.min(index, totalChapters - 1));
+        spineIndex = index;
+        currentSpread = 0;
+        totalSpreads = 1;
+        jumpSpread.set(targetSpread);
+        turning.set(false);
+        layoutPending = true;
+        webView.setOpacity(0);
+        try {
+            engine.load(renderer.getChapterUrlWithTheme(index, theme));
         } catch (Exception ex) {
             showError(ex.getMessage());
         }
     }
 
-    private String blankPage() {
-        return "<html><body style='background:" + theme.bgColor
-                + ";margin:0;padding:0;'></body></html>";
+    /**
+     * Injects the CSS multi-column layout script into the currently loaded chapter.
+     *
+     * Key fixes vs previous version:
+     * • Overflow is set on <html> not <body> — body scrollWidth is what we measure
+     * • We use a 200ms setTimeout (not requestAnimationFrame) to guarantee WebKit
+     * has fully reflowed the column layout before we measure scrollWidth.
+     * rAF fires after paint but before layout is stable for multi-column content.
+     * • The gutter (COLUMN_GAP) is included in the body width calculation so the
+     * two columns sum exactly to viewportWidth with no overflow.
+     * • Images get page-break-inside:avoid so they never split across columns.
+     * • After measurement we clamp html.style.width to exactly N * vw so the
+     * 3rd-column bleed is impossible.
+     */
+    private void injectColumnLayout(int targetSpread) {
+        double vw = webView.getWidth();
+        double vh = webView.getHeight();
+        if (vw <= 0 || vh <= 0) {
+            Platform.runLater(() -> injectColumnLayout(targetSpread));
+            return;
+        }
+
+        double gap = COLUMN_GAP;
+        double padH = theme.marginH;
+        double padV = 32.0;
+        // sentinel value meaning "jump to last spread"
+        int sentinel = Integer.MAX_VALUE;
+
+        /*
+         * LAYOUT MODEL — html is the viewport, body is the infinite column strip.
+         *
+         * The critical rule: body must have NO width and NO overflow constraints.
+         * If body.overflow=hidden or body.width=vw, WebKit clips the column layout
+         * to vw and body.scrollWidth returns vw regardless of content length —
+         * making it look like the entire chapter is only 1 spread.
+         *
+         * Correct setup:
+         * html → width=vw, height=vh, overflow=hidden (the viewport window)
+         * body → NO width, NO overflow, height=vh (expands freely to right)
+         * column-count:2 makes content flow into horizontal columns
+         * After setTimeout(260ms) → measure body.scrollWidth (full extent)
+         * totalSpreads = ceil(scrollWidth / vw)
+         * html.scrollLeft = spread * vw (scrolls the viewport over the strip)
+         */
+        String js = String.format("""
+                (function() {
+                    var VW = %f, VH = %f, GAP = %f, PAD_H = %f, PAD_V = %f;
+                    var TARGET = %d, SENTINEL = %d;
+
+                    var html = document.documentElement;
+                    var body = document.body;
+
+                    /*
+                     * LAYOUT MODEL:
+                     *
+                     *  <html>  — acts as the viewport window.
+                     *            Width  = VW (exactly one screen width visible at a time).
+                     *            Height = VH.
+                     *            overflow: hidden — clips everything outside VW × VH.
+                     *            scrollLeft is what we move to "turn pages".
+                     *
+                     *  <body>  — acts as the infinite horizontal column strip.
+                     *            Width  = UNCONSTRAINED (no width set — body expands as
+                     *                     WebKit adds columns to the right).
+                     *            Height = VH (fixed — columns fill downward then overflow
+                     *                     horizontally into the next column).
+                     *            overflow: visible — so body.scrollWidth reports the FULL
+                     *                     horizontal extent of all columns, not just VW.
+                     *            column-count: 2 — two columns per screen width (spread).
+                     *
+                     *  Measuring: body.scrollWidth = total width of all columns.
+                     *             totalSpreads = Math.ceil(body.scrollWidth / VW).
+                     *
+                     *  The key insight: if body has overflow:hidden or width:VW, WebKit
+                     *  clips the column layout to VW and body.scrollWidth == VW, making
+                     *  it look like there's only 1 spread regardless of content length.
+                     */
+
+                    /* ── 1. html = viewport window ────────────────── */
+                    html.style.setProperty('margin',     '0',        'important');
+                    html.style.setProperty('padding',    '0',        'important');
+                    html.style.setProperty('width',      VW + 'px',  'important');
+                    html.style.setProperty('height',     VH + 'px',  'important');
+                    html.style.setProperty('overflow',   'hidden',   'important');
+
+                    /* ── 2. body = unconstrained column strip ─────── */
+                    body.style.setProperty('margin',               '0',           'important');
+                    body.style.setProperty('padding-top',          PAD_V + 'px',  'important');
+                    body.style.setProperty('padding-bottom',       PAD_V + 'px',  'important');
+                    body.style.setProperty('padding-left',         PAD_H + 'px',  'important');
+                    body.style.setProperty('padding-right',        PAD_H + 'px',  'important');
+                    /* CRITICAL: NO width, NO overflow — body must expand freely */
+                    body.style.removeProperty('width');
+                    body.style.removeProperty('overflow');
+                    body.style.removeProperty('overflow-x');
+                    body.style.removeProperty('overflow-y');
+                    /* Fixed height so content flows into next column instead of down */
+                    body.style.setProperty('height',               VH + 'px',     'important');
+                    /* CSS columns */
+                    body.style.setProperty('column-count',         '2',           'important');
+                    body.style.setProperty('column-gap',           GAP + 'px',    'important');
+                    body.style.setProperty('column-fill',          'auto',        'important');
+                    /* WebKit prefixed versions (required in JavaFX WebView) */
+                    body.style.setProperty('-webkit-column-count', '2',           'important');
+                    body.style.setProperty('-webkit-column-gap',   GAP + 'px',    'important');
+                    body.style.setProperty('-webkit-column-fill',  'auto',        'important');
+
+                    /* ── 3. Images: constrain + prevent column split ─ */
+                    var els = document.querySelectorAll('img, figure, svg, table');
+                    for (var i = 0; i < els.length; i++) {
+                        els[i].style.setProperty('-webkit-column-break-inside', 'avoid', 'important');
+                        els[i].style.setProperty('break-inside',    'avoid',   'important');
+                        els[i].style.setProperty('page-break-inside','avoid',  'important');
+                        els[i].style.setProperty('max-width',       '100%%',   'important');
+                        els[i].style.setProperty('max-height',      (VH * 0.82) + 'px', 'important');
+                        els[i].style.setProperty('width',           'auto',    'important');
+                        els[i].style.setProperty('height',          'auto',    'important');
+                        els[i].style.setProperty('object-fit',      'contain', 'important');
+                    }
+
+                    /* ── 4. Wait for WebKit to finish column reflow ─ */
+                    /*    rAF alone is not enough for multi-column layout;  */
+                    /*    a short timeout gives the engine time to complete. */
+                    setTimeout(function() {
+
+                        /* ── 5. Measure FULL column extent ────────── */
+                        /*    body has no width/overflow constraints so  */
+                        /*    scrollWidth correctly reflects all columns. */
+                        var sw    = body.scrollWidth;
+                        var total = Math.max(1, Math.ceil(sw / VW));
+
+                        /* ── 6. Decide which spread to land on ─────── */
+                        var landed = (TARGET === SENTINEL)
+                            ? total - 1
+                            : Math.min(TARGET, total - 1);
+
+                        /* ── 7. Scroll html (the viewport) ────────── */
+                        html.scrollLeft = landed * VW;
+
+                        /* ── 8. Store state globals for navigation ── */
+                        window._qpVW           = VW;
+                        window._qpTotalSpreads = total;
+                        window._qpCurSpread    = landed;
+
+                        /* ── 9. Report to Java ─────────────────────── */
+                        window.status = 'qp:layout:' + total + ':' + landed;
+
+                    }, 260);
+                })();
+                """,
+                vw, vh, gap, padH, padV, targetSpread, sentinel);
+
+        try {
+            engine.executeScript(js);
+        } catch (Exception e) {
+            System.err.println("[Reader] inject error: " + e.getMessage());
+            layoutPending = false;
+        }
     }
 
-    // ── Toolbar action handlers ───────────────────────────────────────────────
+    // ── Navigation ────────────────────────────────────────────────────────────
+
+    @FXML
+    void onNextPage() {
+        doNextSpread();
+    }
+
+    @FXML
+    void onPrevPage() {
+        doPrevSpread();
+    }
+
+    private void doNextSpread() {
+        if (layoutPending)
+            return; // layout not ready yet
+        if (!turning.compareAndSet(false, true))
+            return;
+
+        // Execute JS that advances one spread and reports back via window.status
+        try {
+            engine.executeScript(String.format("""
+                    (function() {
+                        var cur   = window._qpCurSpread    || 0;
+                        var total = window._qpTotalSpreads || 1;
+                        var vw    = window._qpVW           || %f;
+                        if (cur + 1 < total) {
+                            var next = cur + 1;
+                            window._qpCurSpread = next;
+                            document.documentElement.scrollLeft = next * vw;
+                            window.status = 'qp:turned:' + next;
+                        } else {
+                            window.status = 'qp:next-chapter';
+                        }
+                    })();
+                    """, webView.getWidth()));
+        } catch (Exception e) {
+            turning.set(false);
+        }
+    }
+
+    private void doPrevSpread() {
+        if (layoutPending)
+            return;
+        if (!turning.compareAndSet(false, true))
+            return;
+
+        try {
+            engine.executeScript(String.format("""
+                    (function() {
+                        var cur = window._qpCurSpread || 0;
+                        var vw  = window._qpVW        || %f;
+                        if (cur > 0) {
+                            var prev = cur - 1;
+                            window._qpCurSpread = prev;
+                            document.documentElement.scrollLeft = prev * vw;
+                            window.status = 'qp:turned:' + prev;
+                        } else {
+                            window.status = 'qp:prev-chapter';
+                        }
+                    })();
+                    """, webView.getWidth()));
+        } catch (Exception e) {
+            turning.set(false);
+        }
+    }
+
+    // ── Toolbar ───────────────────────────────────────────────────────────────
 
     @FXML
     private void onBack() {
@@ -256,6 +506,8 @@ public class ReaderController {
             renderer.cleanup();
         setWindowTitle("QuietPages");
         closeAllPopups();
+        if (tocPopup != null && tocPopup.isShowing())
+            tocPopup.hide();
         if (onBackCallback != null)
             onBackCallback.run();
     }
@@ -264,16 +516,13 @@ public class ReaderController {
     private void onToc() {
         if (renderer == null)
             return;
-        // TOC panel is a sliding overlay from the left — toggle it
-        Node existing = readerStack.lookup("#" + ID_TOC);
-        if (existing != null) {
-            readerStack.getChildren().remove(existing);
+        if (tocPopup != null && tocPopup.isShowing()) {
+            tocPopup.hide();
             btnToc.getStyleClass().remove("active");
-        } else {
-            closeAllPopups();
-            showTocPanel(renderer.getToc());
-            btnToc.getStyleClass().add("active");
+            return;
         }
+        showTocPopup(renderer.getToc());
+        btnToc.getStyleClass().add("active");
     }
 
     @FXML
@@ -310,192 +559,127 @@ public class ReaderController {
             return;
         fullscreen = !fullscreen;
         s.setFullScreen(fullscreen);
-        // Update icon: expand ↔ compress
         iconFullscreen.setIconLiteral(fullscreen ? "fas-compress" : "fas-expand");
+        // Re-inject layout after fullscreen toggle so columns resize correctly
+        Platform.runLater(() -> {
+            layoutPending = true;
+            injectColumnLayout(currentSpread);
+        });
     }
 
-    @FXML
-    private void onPrevPage() {
-        if (currentIndex > 0) {
-            currentIndex = Math.max(0, currentIndex - 2);
-            loadSpread();
-        }
-    }
+    // ── TOC popup ─────────────────────────────────────────────────────────────
 
-    @FXML
-    private void onNextPage() {
-        if (renderer == null)
-            return;
-        if (currentIndex + 2 < totalChapters) {
-            currentIndex += 2;
-            loadSpread();
-        } else if (currentIndex + 1 < totalChapters) {
-            currentIndex++;
-            loadSpread();
-        }
-    }
+    private void showTocPopup(List<TocEntry> tocList) {
+        VBox content = new VBox(0);
+        content.setStyle("""
+                -fx-background-color: #1C1C1C;
+                -fx-border-color: #303030;
+                -fx-border-width: 1;
+                -fx-border-radius: 8;
+                -fx-background-radius: 8;
+                -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.85), 24, 0, 0, 8);
+                """);
+        content.setPrefWidth(300);
+        content.setMaxHeight(460);
 
-    // ── TOC panel (slides in from the left) ───────────────────────────────────
-
-    private void showTocPanel(List<TocEntry> tocList) {
-        VBox panel = new VBox(0);
-        panel.setId(ID_TOC);
-        panel.getStyleClass().add("reader-toc-panel");
-        panel.setPrefWidth(340);
-        panel.setMaxWidth(340);
-
-        // Header
         Label header = new Label("Table of Contents");
-        header.getStyleClass().add("reader-toc-header");
+        header.setStyle("""
+                -fx-text-fill: #DDDDDD; -fx-font-size: 13px; -fx-font-weight: bold;
+                -fx-padding: 12 16 11 16;
+                -fx-border-color: transparent transparent #303030 transparent;
+                -fx-border-width: 0 0 1 0;
+                -fx-background-color: #232323; -fx-background-radius: 8 8 0 0;
+                """);
         header.setMaxWidth(Double.MAX_VALUE);
 
-        // TreeView for hierarchical TOC
-        TreeView<TocEntry> tree = new TreeView<>();
-        tree.setShowRoot(false);
-        tree.getStyleClass().add("reader-toc-tree");
-        tree.setStyle("-fx-focus-color: transparent;");
-        VBox.setVgrow(tree, Priority.ALWAYS);
+        VBox list = new VBox(0);
+        populateTocList(list, tocList, 0);
 
-        TreeItem<TocEntry> root = new TreeItem<>();
-        fillTocTree(root, tocList);
-        tree.setRoot(root);
-
-        tree.setCellFactory(tv -> new TreeCell<>() {
-            @Override
-            protected void updateItem(TocEntry item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setGraphic(null);
-                    return;
-                }
-                // Indent child entries slightly
-                boolean isChild = getTreeItem().getParent() != null
-                        && getTreeItem().getParent().getParent() != null;
-                setText(item.title);
-                setStyle("-fx-text-fill: " + (isChild ? "#AAAAAA" : "#DDDDDD") + ";"
-                        + "-fx-font-size: " + (isChild ? "12" : "13") + "px;"
-                        + "-fx-padding: " + (isChild ? "5 8 5 24" : "6 8 6 8") + ";"
-                        + "-fx-background-color: transparent;"
-                        + "-fx-cursor: hand;");
-            }
-        });
-
-        // Navigate on single click
-        tree.getSelectionModel().selectedItemProperty().addListener((obs, ov, nv) -> {
-            if (nv != null && nv.getValue() != null
-                    && !nv.getValue().resolvedUrl.isBlank()) {
-                navigateToTocEntry(nv.getValue());
-                // Close panel after navigation
-                Platform.runLater(() -> {
-                    readerStack.getChildren().remove(panel);
-                    btnToc.getStyleClass().remove("active");
-                });
-            }
-        });
-
-        ScrollPane scroll = new ScrollPane(tree);
-        scroll.getStyleClass().add("reader-scroll-pane");
+        ScrollPane scroll = new ScrollPane(list);
         scroll.setFitToWidth(true);
-        scroll.setFitToHeight(true);
+        scroll.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
+        scroll.getStylesheets().add(
+                getClass().getResource("/com/quietpages/quietpages/library.css").toExternalForm());
         VBox.setVgrow(scroll, Priority.ALWAYS);
+        content.getChildren().addAll(header, scroll);
 
-        panel.getChildren().addAll(header, scroll);
+        tocPopup = new Popup();
+        tocPopup.getContent().add(content);
+        tocPopup.setAutoHide(true);
+        tocPopup.setOnHidden(e -> btnToc.getStyleClass().remove("active"));
 
-        // Pin to left edge, full height
-        StackPane.setAlignment(panel, Pos.CENTER_LEFT);
-        readerStack.getChildren().add(panel);
-
-        // Close when clicking outside the panel
-        readerStack.setOnMouseClicked(e -> {
-            if (e.getX() > 340) {
-                readerStack.getChildren().remove(panel);
-                btnToc.getStyleClass().remove("active");
-                readerStack.setOnMouseClicked(null);
-                readerStack.requestFocus();
-            }
-        });
+        // Anchor below the TOC button (which is now on the LEFT side of toolbar)
+        javafx.geometry.Bounds b = btnToc.localToScreen(btnToc.getBoundsInLocal());
+        if (b != null)
+            tocPopup.show(stage(), b.getMinX(), b.getMaxY() + 4);
+        else
+            tocPopup.show(stage());
     }
 
-    private void fillTocTree(TreeItem<TocEntry> parent, List<TocEntry> list) {
-        for (TocEntry entry : list) {
-            TreeItem<TocEntry> item = new TreeItem<>(entry);
-            item.setExpanded(true);
-            parent.getChildren().add(item);
+    private void populateTocList(VBox list, List<TocEntry> entries, int depth) {
+        for (TocEntry entry : entries) {
+            double lp = 16 + depth * 16.0;
+            Label row = new Label(entry.title);
+            row.setMaxWidth(Double.MAX_VALUE);
+            row.setWrapText(false);
+            row.setStyle(String.format(
+                    "-fx-text-fill:%s;-fx-font-size:%s;-fx-padding:9 14 9 %.0fpx;" +
+                            "-fx-cursor:hand;-fx-background-color:transparent;",
+                    depth == 0 ? "#CCCCCC" : "#888888",
+                    depth == 0 ? "13px" : "12px", lp));
+            row.setOnMouseEntered(e -> row.setStyle(row.getStyle()
+                    .replace("-fx-background-color:transparent;",
+                            "-fx-background-color:rgba(255,255,255,0.06);")));
+            row.setOnMouseExited(e -> row.setStyle(row.getStyle()
+                    .replace("-fx-background-color:rgba(255,255,255,0.06);",
+                            "-fx-background-color:transparent;")));
+            final TocEntry fe = entry;
+            row.setOnMouseClicked(e -> {
+                if (tocPopup != null)
+                    tocPopup.hide();
+                navigateToTocEntry(fe);
+            });
+            list.getChildren().add(row);
             if (!entry.children.isEmpty())
-                fillTocTree(item, entry.children);
+                populateTocList(list, entry.children, depth + 1);
         }
     }
 
     private void navigateToTocEntry(TocEntry entry) {
-        String base = entry.resolvedUrl.split("#")[0];
-        int idx = renderer.findSpineIndex(base);
-        // Snap to even index for clean two-page spread
-        currentIndex = (idx % 2 == 0) ? idx : Math.max(0, idx - 1);
-        loadSpread();
-
-        // Scroll to anchor fragment after page loads
-        if (entry.resolvedUrl.contains("#")) {
-            final String anchor = entry.resolvedUrl.split("#")[1];
-            leftEngine.documentProperty().addListener(
-                    new javafx.beans.value.ChangeListener<org.w3c.dom.Document>() {
-                        @Override
-                        public void changed(
-                                javafx.beans.value.ObservableValue<? extends org.w3c.dom.Document> obs,
-                                org.w3c.dom.Document ov,
-                                org.w3c.dom.Document nv) {
-                            if (nv != null) {
-                                try {
-                                    leftEngine.executeScript(
-                                            "var el=document.getElementById('"
-                                                    + anchor + "');if(el)el.scrollIntoView();");
-                                } catch (Exception ignored) {
-                                }
-                                leftEngine.documentProperty().removeListener(this);
-                            }
-                        }
-                    });
-        }
+        if (entry.resolvedUrl == null || entry.resolvedUrl.isBlank())
+            return;
+        int idx = renderer.findSpineIndex(entry.resolvedUrl.split("#")[0]);
+        loadChapter(idx, 0);
     }
 
-    // ── Search popup (top-right, matches screenshot Image 2) ─────────────────
+    // ── Search popup ──────────────────────────────────────────────────────────
 
     private void showSearchPopup() {
         VBox popup = new VBox(8);
         popup.setId(ID_SEARCH);
         popup.getStyleClass().add("reader-popup");
-        popup.setPadding(new Insets(10, 12, 10, 12));
-        popup.setPrefWidth(360);
-        popup.setMaxWidth(360);
+        popup.setPadding(new Insets(12, 14, 12, 14));
+        popup.setPrefWidth(340);
+        popup.setMaxWidth(340);
 
-        // Row 1: search field
         TextField field = new TextField();
-        field.setPromptText("Find ...");
+        field.setPromptText("Find in chapter...");
         field.getStyleClass().add("reader-search-field");
         field.setMaxWidth(Double.MAX_VALUE);
 
-        // Row 2: Aa | Ab| | [scope dropdown] | → | ✕
-        ToggleButton btnMatchCase = new ToggleButton("Aa");
-        ToggleButton btnWholeWord = new ToggleButton("Ab|");
-        btnMatchCase.getStyleClass().add("reader-search-toggle");
-        btnWholeWord.getStyleClass().add("reader-search-toggle");
+        ToggleButton btnMC = new ToggleButton("Aa");
+        ToggleButton btnWW = new ToggleButton("Ab|");
+        btnMC.getStyleClass().add("reader-search-toggle");
+        btnWW.getStyleClass().add("reader-search-toggle");
 
-        ComboBox<String> scope = new ComboBox<>();
-        scope.getItems().addAll("Current chapter", "Entire book");
-        scope.setValue("Current chapter");
-        scope.getStyleClass().add("reader-search-scope");
-        scope.setPrefWidth(140);
-
-        FontIcon goIcon = new FontIcon("fas-arrow-right");
-        goIcon.setIconSize(12);
-        goIcon.setStyle("-fx-icon-color:#AAAAAA;");
-        Button btnGo = new Button("", goIcon);
+        FontIcon gi = new FontIcon("fas-arrow-right");
+        gi.setIconSize(12);
+        Button btnGo = new Button("", gi);
         btnGo.getStyleClass().add("reader-search-icon-btn");
 
-        FontIcon closeIcon = new FontIcon("fas-times");
-        closeIcon.setIconSize(12);
-        closeIcon.setStyle("-fx-icon-color:#AAAAAA;");
-        Button btnClose = new Button("", closeIcon);
+        FontIcon ci = new FontIcon("fas-times");
+        ci.setIconSize(12);
+        Button btnClose = new Button("", ci);
         btnClose.getStyleClass().add("reader-search-icon-btn");
         btnClose.setOnAction(e -> {
             readerStack.getChildren().remove(popup);
@@ -503,34 +687,28 @@ public class ReaderController {
             clearSearchHighlights();
         });
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox row2 = new HBox(6, btnMatchCase, btnWholeWord, spacer, scope, btnGo, btnClose);
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
+        HBox row2 = new HBox(6, btnMC, btnWW, sp, btnGo, btnClose);
         row2.setAlignment(Pos.CENTER_LEFT);
 
-        // Result label
         Label resultLbl = new Label();
         resultLbl.setStyle("-fx-font-size:11px;");
-
         popup.getChildren().addAll(field, row2, resultLbl);
         StackPane.setAlignment(popup, Pos.TOP_RIGHT);
-        StackPane.setMargin(popup, new Insets(8, 8, 0, 0));
+        StackPane.setMargin(popup, new Insets(60, 8, 0, 0));
         readerStack.getChildren().add(popup);
         Platform.runLater(field::requestFocus);
 
-        // Search logic
-        Runnable doSearch = () -> {
+        Runnable search = () -> {
             String term = field.getText().trim();
             if (term.isBlank())
                 return;
-            // Use browser's window.find() — works in WebKit/WebView
             String safe = term.replace("\\", "\\\\").replace("'", "\\'");
-            String js = String.format(
-                    "window.find('%s',%b,false,true,%b)",
-                    safe, btnMatchCase.isSelected(), btnWholeWord.isSelected());
             try {
-                boolean found = Boolean.parseBoolean(
-                        String.valueOf(leftEngine.executeScript(js)));
+                boolean found = Boolean.parseBoolean(String.valueOf(engine.executeScript(
+                        "window.find('" + safe + "'," + btnMC.isSelected() + ",false,true," + btnWW.isSelected()
+                                + ")")));
                 resultLbl.setText(found ? "✓ Match found" : "✗ No matches");
                 resultLbl.getStyleClass().setAll(
                         found ? "reader-search-result-found" : "reader-search-result-none");
@@ -538,119 +716,109 @@ public class ReaderController {
                 resultLbl.setText("Search error");
             }
         };
-        btnGo.setOnAction(e -> doSearch.run());
-        field.setOnAction(e -> doSearch.run());
+        btnGo.setOnAction(e -> search.run());
+        field.setOnAction(e -> search.run());
     }
 
     private void clearSearchHighlights() {
         try {
-            leftEngine.executeScript("window.getSelection().removeAllRanges()");
-        } catch (Exception ignored) {
-        }
-        try {
-            rightEngine.executeScript("window.getSelection().removeAllRanges()");
+            engine.executeScript("window.getSelection().removeAllRanges()");
         } catch (Exception ignored) {
         }
     }
 
-    // ── Text style popup (top-right, matches screenshot Image 1) ─────────────
+    // ── Text Style popup ──────────────────────────────────────────────────────
 
     private void showTextStylePopup() {
         VBox popup = new VBox(10);
         popup.setId(ID_STYLE);
         popup.getStyleClass().add("reader-popup");
         popup.setPadding(new Insets(16));
-        popup.setPrefWidth(340);
-        popup.setMaxWidth(340);
+        popup.setPrefWidth(300);
+        popup.setMaxWidth(300);
 
-        // ── Line space ────────────────────────────────────────────────────────
-        Label lblLine = new Label("Line space");
-        lblLine.getStyleClass().add("reader-popup-label");
-        Slider sliderLine = makeSlider(1.0, 3.0, theme.lineHeight);
+        Label ll = mkLbl("Line spacing");
+        Slider sl = mkSlider(1.2, 3.0, theme.lineHeight);
+        Label lf = mkLbl("Font size");
+        Slider sf = mkSlider(12, 28, theme.fontSize);
+        Label lp = mkLbl("Para spacing");
+        Slider sp = mkSlider(0, 3.0, theme.paragraphSpace);
+        Label lm = mkLbl("Page margin");
+        Slider sm = mkSlider(16, 80, theme.marginH);
 
-        // ── Word space ────────────────────────────────────────────────────────
-        Label lblWord = new Label("Word space");
-        lblWord.getStyleClass().add("reader-popup-label");
-        Slider sliderWord = makeSlider(-0.05, 0.5, theme.wordSpacing);
+        Label la = mkLbl("Alignment");
+        ToggleGroup ag = new ToggleGroup();
+        ToggleButton taL = mkAlignBtn("fas-align-left", "left", ag);
+        ToggleButton taC = mkAlignBtn("fas-align-center", "center", ag);
+        ToggleButton taJ = mkAlignBtn("fas-align-justify", "justify", ag);
+        ToggleButton taR = mkAlignBtn("fas-align-right", "right", ag);
+        ag.getToggles().stream().filter(t -> theme.textAlign.equals(t.getUserData()))
+                .findFirst().ifPresent(ag::selectToggle);
+        HBox ar = new HBox(6, taL, taC, taJ, taR);
+        ar.setAlignment(Pos.CENTER_LEFT);
 
-        // ── Paragraph space ───────────────────────────────────────────────────
-        Label lblPara = new Label("Paragraph space");
-        lblPara.getStyleClass().add("reader-popup-label");
-        Slider sliderPara = makeSlider(0.0, 3.0, theme.paragraphSpace);
-
-        // ── Text alignment ────────────────────────────────────────────────────
-        Label lblAlign = new Label("Text alignment");
-        lblAlign.getStyleClass().add("reader-popup-label");
-
-        ToggleGroup alignGroup = new ToggleGroup();
-        ToggleButton aLeft = makeAlignBtn("fas-align-left", "left", alignGroup);
-        ToggleButton aCenter = makeAlignBtn("fas-align-center", "center", alignGroup);
-        ToggleButton aJustify = makeAlignBtn("fas-align-justify", "justify", alignGroup);
-        ToggleButton aRight = makeAlignBtn("fas-align-right", "right", alignGroup);
-
-        // Select whichever matches current theme
-        alignGroup.getToggles().stream()
-                .filter(t -> theme.textAlign.equals(t.getUserData()))
-                .findFirst().ifPresent(alignGroup::selectToggle);
-
-        HBox alignRow = new HBox(6, aLeft, aCenter, aJustify, aRight);
-        alignRow.setAlignment(Pos.CENTER_LEFT);
-
-        // ── Reset button ──────────────────────────────────────────────────────
-        Button btnReset = new Button("↺");
+        Button btnReset = new Button("↺  Reset");
         btnReset.getStyleClass().add("reader-reset-btn");
         btnReset.setOnAction(e -> {
-            // Mutate in place — do NOT reassign theme (lambda capture issues)
-            ReaderTheme defaults = new ReaderTheme();
-            theme.lineHeight = defaults.lineHeight;
-            theme.wordSpacing = defaults.wordSpacing;
-            theme.paragraphSpace = defaults.paragraphSpace;
-            theme.textAlign = defaults.textAlign;
-            theme.fontSize = defaults.fontSize;
-            theme.marginH = defaults.marginH;
-
-            sliderLine.setValue(theme.lineHeight);
-            sliderWord.setValue(theme.wordSpacing);
-            sliderPara.setValue(theme.paragraphSpace);
-            alignGroup.getToggles().stream()
-                    .filter(t -> "justify".equals(t.getUserData()))
-                    .findFirst().ifPresent(alignGroup::selectToggle);
-            loadSpread();
+            ReaderTheme d = new ReaderTheme();
+            theme.lineHeight = d.lineHeight;
+            theme.fontSize = d.fontSize;
+            theme.paragraphSpace = d.paragraphSpace;
+            theme.textAlign = d.textAlign;
+            theme.marginH = d.marginH;
+            sl.setValue(d.lineHeight);
+            sf.setValue(d.fontSize);
+            sp.setValue(d.paragraphSpace);
+            sm.setValue(d.marginH);
+            ag.getToggles().stream().filter(t -> "justify".equals(t.getUserData()))
+                    .findFirst().ifPresent(ag::selectToggle);
+            reloadCurrentChapter();
         });
+        FontIcon ci2 = new FontIcon("fas-times");
+        ci2.setIconSize(11);
+        Button btnClose = new Button("", ci2);
+        btnClose.getStyleClass().add("reader-search-icon-btn");
+        btnClose.setOnAction(e -> {
+            readerStack.getChildren().remove(popup);
+            btnTextStyle.getStyleClass().remove("active");
+        });
+        Region rx = new Region();
+        HBox.setHgrow(rx, Priority.ALWAYS);
+        HBox br = new HBox(8, btnReset, rx, btnClose);
+        br.setAlignment(Pos.CENTER_LEFT);
 
-        HBox resetRow = new HBox(btnReset);
-        resetRow.setAlignment(Pos.BOTTOM_RIGHT);
-
-        popup.getChildren().addAll(
-                lblLine, sliderLine,
-                lblWord, sliderWord,
-                lblPara, sliderPara,
-                lblAlign, alignRow,
-                resetRow);
-
+        popup.getChildren().addAll(ll, sl, lf, sf, lp, sp, lm, sm, la, ar, br);
         StackPane.setAlignment(popup, Pos.TOP_RIGHT);
-        StackPane.setMargin(popup, new Insets(8, 8, 0, 0));
+        StackPane.setMargin(popup, new Insets(60, 8, 0, 0));
         readerStack.getChildren().add(popup);
 
-        // Live preview — listeners use ReaderController.this to avoid capture issues
-        sliderLine.valueProperty().addListener((o, ov, nv) -> {
-            ReaderController.this.theme.lineHeight = nv.doubleValue();
-            loadSpread();
+        sl.valueProperty().addListener((o, ov, nv) -> {
+            theme.lineHeight = nv.doubleValue();
+            reloadCurrentChapter();
         });
-        sliderWord.valueProperty().addListener((o, ov, nv) -> {
-            ReaderController.this.theme.wordSpacing = nv.doubleValue();
-            loadSpread();
+        sf.valueProperty().addListener((o, ov, nv) -> {
+            theme.fontSize = nv.doubleValue();
+            reloadCurrentChapter();
         });
-        sliderPara.valueProperty().addListener((o, ov, nv) -> {
-            ReaderController.this.theme.paragraphSpace = nv.doubleValue();
-            loadSpread();
+        sp.valueProperty().addListener((o, ov, nv) -> {
+            theme.paragraphSpace = nv.doubleValue();
+            reloadCurrentChapter();
         });
-        alignGroup.selectedToggleProperty().addListener((o, ov, nv) -> {
+        sm.valueProperty().addListener((o, ov, nv) -> {
+            theme.marginH = nv.doubleValue();
+            reloadCurrentChapter();
+        });
+        ag.selectedToggleProperty().addListener((o, ov, nv) -> {
             if (nv != null) {
-                ReaderController.this.theme.textAlign = (String) nv.getUserData();
-                loadSpread();
+                theme.textAlign = (String) nv.getUserData();
+                reloadCurrentChapter();
             }
         });
+    }
+
+    private void reloadCurrentChapter() {
+        layoutPending = true;
+        loadChapter(spineIndex, currentSpread);
     }
 
     // ── Status bar ────────────────────────────────────────────────────────────
@@ -658,19 +826,19 @@ public class ReaderController {
     private void updateStatusBar() {
         if (renderer == null)
             return;
+        String chapName = chapNameFor(spineIndex);
+        String title = renderer.getBookTitle();
+        String crumb = (chapName.isEmpty() || chapName.equalsIgnoreCase(title))
+                ? title
+                : title + "  ›  " + chapName;
+        crumb += "     " + (currentSpread + 1) + " / " + totalSpreads;
+        lblBreadcrumb.setText(crumb);
 
-        // Breadcrumb: "BookTitle » ChapterName N/Total"
-        String bookTitle = renderer.getBookTitle();
-        String chapName = chapNameFor(currentIndex);
-        String breadcrumb = chapName.isEmpty() || chapName.equalsIgnoreCase(bookTitle)
-                ? bookTitle
-                : bookTitle + " » " + chapName;
-        breadcrumb += "   " + (currentIndex + 1) + "/" + totalChapters;
-        lblBreadcrumb.setText(breadcrumb);
-
-        // Progress percentage
-        double pct = totalChapters > 0 ? currentIndex * 100.0 / totalChapters : 0.0;
-        lblProgress.setText(String.format("%.2f%%", pct));
+        double pct = totalChapters > 0
+                ? ((spineIndex + (totalSpreads > 1 ? (double) currentSpread / totalSpreads : 0.0))
+                        / totalChapters) * 100.0
+                : 0.0;
+        lblProgress.setText(String.format("%.1f%%", pct));
     }
 
     private String chapNameFor(int idx) {
@@ -679,72 +847,75 @@ public class ReaderController {
         String url = renderer.getChapterUrl(idx);
         if (url == null)
             return "";
-        for (TocEntry e : renderer.getToc()) {
-            if (e.resolvedUrl != null && e.resolvedUrl.split("#")[0].equals(url))
+        String base = url.split("#")[0];
+        for (TocEntry e : renderer.getToc())
+            if (e.resolvedUrl != null && e.resolvedUrl.split("#")[0].equals(base))
                 return e.title;
-        }
         return "";
     }
 
-    // ── Progress persistence ──────────────────────────────────────────────────
+    // ── Progress ──────────────────────────────────────────────────────────────
 
     private void persistProgress() {
         if (book == null || totalChapters == 0)
             return;
-        double p = (double) currentIndex / totalChapters;
+        double p = (double) spineIndex / totalChapters;
         book.setReadingProgress(p);
         try (PreparedStatement ps = DatabaseManager.getInstance().getConnection()
-                .prepareStatement(
-                        "UPDATE books SET reading_progress=?," +
-                                " reading_status='READING', last_read=datetime('now') WHERE id=?")) {
+                .prepareStatement("UPDATE books SET reading_progress=?, reading_status='READING'," +
+                        " last_read=datetime('now') WHERE id=?")) {
             ps.setDouble(1, p);
             ps.setInt(2, book.getId());
             ps.executeUpdate();
         } catch (Exception e) {
-            System.err.println("[Reader] Progress save failed: " + e.getMessage());
+            System.err.println("[Reader] progress: " + e.getMessage());
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void closeAllPopups() {
-        for (String id : new String[] { ID_TOC, ID_SEARCH, ID_STYLE }) {
+        for (String id : new String[] { ID_SEARCH, ID_STYLE }) {
             Node n = readerStack.lookup("#" + id);
             if (n != null)
                 readerStack.getChildren().remove(n);
         }
-        btnToc.getStyleClass().remove("active");
         btnSearch.getStyleClass().remove("active");
         btnTextStyle.getStyleClass().remove("active");
     }
 
-    private Slider makeSlider(double min, double max, double val) {
+    private Slider mkSlider(double min, double max, double val) {
         Slider s = new Slider(min, max, val);
         s.getStyleClass().add("reader-style-slider");
         s.setMaxWidth(Double.MAX_VALUE);
+        s.setShowTickMarks(false);
+        s.setShowTickLabels(false);
         return s;
     }
 
-    private ToggleButton makeAlignBtn(String iconLiteral, String align, ToggleGroup grp) {
-        final FontIcon fi = new FontIcon(iconLiteral);
-        fi.setIconSize(14);
-        fi.setStyle("-fx-icon-color:#AAAAAA;");
+    private Label mkLbl(String t) {
+        Label l = new Label(t);
+        l.getStyleClass().add("reader-popup-label");
+        return l;
+    }
 
+    private ToggleButton mkAlignBtn(String icon, String align, ToggleGroup grp) {
+        FontIcon fi = new FontIcon(icon);
+        fi.setIconSize(13);
+        fi.setStyle("-fx-icon-color:#777777;");
         ToggleButton btn = new ToggleButton("", fi);
         btn.setToggleGroup(grp);
         btn.setUserData(align);
         btn.getStyleClass().add("reader-align-btn");
-
-        // Keep icon color in sync with selected state
         btn.selectedProperty()
-                .addListener((o, ov, nv) -> fi.setStyle("-fx-icon-color:" + (nv ? "#C0284A" : "#AAAAAA") + ";"));
+                .addListener((o, ov, nv) -> fi.setStyle("-fx-icon-color:" + (nv ? "#C0284A" : "#777777") + ";"));
         return btn;
     }
 
-    private void setWindowTitle(String title) {
+    private void setWindowTitle(String t) {
         Stage s = stage();
         if (s != null)
-            s.setTitle(title);
+            s.setTitle(t);
     }
 
     private Stage stage() {
@@ -754,30 +925,19 @@ public class ReaderController {
     }
 
     private void showError(String msg) {
-        leftEngine.loadContent(
-                "<html><body style='background:#0D0D0D;color:#FF5555;" +
-                        "font-family:sans-serif;padding:40px;font-size:15px;'>" +
-                        "<b>Could not open book</b><br><br>" + msg + "</body></html>");
-        rightEngine.loadContent(blankPage());
+        engine.loadContent("<html><body style='background:#0D0D0D;color:#FF6666;" +
+                "font-family:sans-serif;padding:48px;font-size:15px;'>" +
+                "<b>Could not open book</b><br><br>" + msg + "</body></html>", "text/html");
     }
 
-    // ── Public API for Settings tab (future reader theme customization) ────────
-
-    /**
-     * Returns the current reader theme.
-     * Settings tab can call getTheme(), modify fields, then call setTheme().
-     */
+    // ── Public API ────────────────────────────────────────────────────────────
     public ReaderTheme getTheme() {
         return theme;
     }
 
-    /**
-     * Applies a new reader theme and reloads the current spread.
-     * Settings tab calls this when user switches between Dark / Light / Sepia.
-     */
     public void setTheme(ReaderTheme t) {
         this.theme = t;
         if (renderer != null)
-            loadSpread();
+            reloadCurrentChapter();
     }
 }

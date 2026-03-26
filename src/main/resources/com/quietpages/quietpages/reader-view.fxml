@@ -6,91 +6,117 @@
 <?import org.kordamp.ikonli.javafx.FontIcon?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21"
-            xmlns:fx="http://javafx.com/fxml/1"
-            fx:controller="com.quietpages.quietpages.controller.ReaderController"
-            fx:id="readerRoot"
-            styleClass="reader-root"
-            stylesheets="@reader.css">
+    xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.quietpages.quietpages.controller.ReaderController" fx:id="readerRoot" styleClass="reader-root" stylesheets="@reader.css">
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         TOP TOOLBAR — matches Aquile Reader screenshots exactly
-         Back ← | Title                    | ☰ ✎ 🔖 🔍 🔊 Aa AA ⛶
+         TOP TOOLBAR
+         LEFT  : ← Back  |  ☰ TOC  |  Book Title
+         RIGHT : 🔍 Search  |  Tт Style  |  ⛶ Fullscreen
          ══════════════════════════════════════════════════════════════════════ -->
     <top>
         <HBox fx:id="toolbarBox" styleClass="reader-toolbar" alignment="CENTER_LEFT">
 
-            <!-- Back arrow — returns to library -->
+            <!-- Back -->
             <Button fx:id="btnBack" styleClass="reader-toolbar-btn" onAction="#onBack">
-                <graphic><FontIcon iconLiteral="fas-arrow-left" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Back to Library"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-arrow-left" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Back to Library"/>
+                </tooltip>
             </Button>
 
-            <!-- Book title — centered between back and right buttons -->
-            <Label fx:id="lblBookTitle" styleClass="reader-book-title" text=""/>
-
-            <!-- Push right-side buttons to the right -->
-            <Region HBox.hgrow="ALWAYS"/>
-
-            <!-- TOC — implemented -->
+            <!-- TOC — LEFT side, right after Back -->
             <Button fx:id="btnToc" styleClass="reader-toolbar-btn" onAction="#onToc">
-                <graphic><FontIcon iconLiteral="fas-bars" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Table of Contents"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-list-ul" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Table of Contents"/>
+                </tooltip>
             </Button>
 
-            <!-- Highlights — NOT yet implemented -->
+            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 6 10 6;"/>
+
+            <!-- Book title — expands to fill space -->
+            <Label fx:id="lblBookTitle" styleClass="reader-book-title" text="" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+
+            <!-- ── RIGHT SIDE ── -->
+
+            <!-- Highlights (future) -->
             <Button fx:id="btnHighlights" styleClass="reader-toolbar-btn" disable="true">
-                <graphic><FontIcon iconLiteral="fas-user-edit" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Highlights &amp; Notes (coming soon)"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-highlighter" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Highlights (coming soon)"/>
+                </tooltip>
             </Button>
 
-            <!-- Bookmarks — NOT yet implemented -->
+            <!-- Bookmarks (future) -->
             <Button fx:id="btnBookmarks" styleClass="reader-toolbar-btn" disable="true">
-                <graphic><FontIcon iconLiteral="fas-bookmark" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Bookmarks (coming soon)"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-bookmark" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Bookmarks (coming soon)"/>
+                </tooltip>
             </Button>
 
-            <!-- Vertical separator -->
-            <Separator orientation="VERTICAL"
-                       style="-fx-background-color:#2A2A2A;-fx-pref-width:1;-fx-padding:8 4 8 4;"/>
+            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
 
-            <!-- Search — implemented -->
+            <!-- Search -->
             <Button fx:id="btnSearch" styleClass="reader-toolbar-btn" onAction="#onSearch">
-                <graphic><FontIcon iconLiteral="fas-search" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Search"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-search" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Search"/>
+                </tooltip>
             </Button>
 
-            <!-- Read Aloud — NOT yet implemented -->
+            <!-- Read Aloud (future) -->
             <Button fx:id="btnReadAloud" styleClass="reader-toolbar-btn" disable="true">
-                <graphic><FontIcon iconLiteral="fas-volume-up" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Read Aloud (coming soon)"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-volume-up" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Read Aloud (coming soon)"/>
+                </tooltip>
             </Button>
 
-            <!-- Vertical separator -->
-            <Separator orientation="VERTICAL"
-                       style="-fx-background-color:#2A2A2A;-fx-pref-width:1;-fx-padding:8 4 8 4;"/>
+            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
 
-            <!-- Text Style — implemented (Aa icon, line/word/para spacing) -->
+            <!-- Text Style -->
             <Button fx:id="btnTextStyle" styleClass="reader-toolbar-btn" onAction="#onTextStyle">
-                <graphic><FontIcon iconLiteral="fas-text-height" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Text Style"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-text-height" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Text Style"/>
+                </tooltip>
             </Button>
 
-            <!-- Font chooser — NOT yet implemented -->
+            <!-- Font (future) -->
             <Button fx:id="btnFont" styleClass="reader-toolbar-btn" disable="true">
-                <graphic><FontIcon iconLiteral="fas-font" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Font (coming soon)"/></tooltip>
+                <graphic>
+                    <FontIcon iconLiteral="fas-font" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Font (coming soon)"/>
+                </tooltip>
             </Button>
 
-            <!-- Vertical separator -->
-            <Separator orientation="VERTICAL"
-                       style="-fx-background-color:#2A2A2A;-fx-pref-width:1;-fx-padding:8 4 8 4;"/>
+            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
 
-            <!-- Fullscreen toggle — implemented -->
-            <Button fx:id="btnFullscreen" styleClass="reader-toolbar-btn"
-                    onAction="#onFullscreen">
-                <graphic><FontIcon fx:id="iconFullscreen"
-                                   iconLiteral="fas-expand" iconSize="16"/></graphic>
-                <tooltip><Tooltip text="Toggle Fullscreen"/></tooltip>
+            <!-- Fullscreen -->
+            <Button fx:id="btnFullscreen" styleClass="reader-toolbar-btn" onAction="#onFullscreen">
+                <graphic>
+                    <FontIcon fx:id="iconFullscreen" iconLiteral="fas-expand" iconSize="15"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="Toggle Fullscreen"/>
+                </tooltip>
             </Button>
 
         </HBox>
@@ -98,31 +124,28 @@
 
     <!-- ══════════════════════════════════════════════════════════════════════
          MAIN READING AREA
-         Two WebViews side-by-side (left page + right page)
-         Nav arrows overlaid on left and right edges
-         TOC panel, Search popup, Text Style popup all float over this
+         Single WebView added in code to webViewContainer.
+         CSS column-count:2 applied via JS → left column = left page,
+         right column = right page. One spread = viewportWidth of content.
          ══════════════════════════════════════════════════════════════════════ -->
     <center>
         <StackPane fx:id="readerStack" styleClass="reader-stack">
 
-            <!-- Two page columns + 1px center divider -->
-            <HBox fx:id="webViewContainer" styleClass="reader-pages"
-                  StackPane.alignment="CENTER"/>
+            <!-- WebView injected programmatically in buildWebView() -->
+            <HBox fx:id="webViewContainer" styleClass="reader-pages" StackPane.alignment="CENTER" maxWidth="Infinity" maxHeight="Infinity"/>
 
-            <!-- Left nav arrow (previous pages) -->
-            <Button fx:id="btnPrevPage"
-                    styleClass="reader-nav-btn reader-nav-left"
-                    onAction="#onPrevPage"
-                    StackPane.alignment="CENTER_LEFT">
-                <graphic><FontIcon iconLiteral="fas-chevron-left" iconSize="22"/></graphic>
+            <!-- Previous spread / chapter -->
+            <Button fx:id="btnPrevPage" styleClass="reader-nav-btn reader-nav-left" onAction="#onPrevPage" StackPane.alignment="CENTER_LEFT">
+                <graphic>
+                    <FontIcon iconLiteral="fas-chevron-left" iconSize="20"/>
+                </graphic>
             </Button>
 
-            <!-- Right nav arrow (next pages) -->
-            <Button fx:id="btnNextPage"
-                    styleClass="reader-nav-btn reader-nav-right"
-                    onAction="#onNextPage"
-                    StackPane.alignment="CENTER_RIGHT">
-                <graphic><FontIcon iconLiteral="fas-chevron-right" iconSize="22"/></graphic>
+            <!-- Next spread / chapter -->
+            <Button fx:id="btnNextPage" styleClass="reader-nav-btn reader-nav-right" onAction="#onNextPage" StackPane.alignment="CENTER_RIGHT">
+                <graphic>
+                    <FontIcon iconLiteral="fas-chevron-right" iconSize="20"/>
+                </graphic>
             </Button>
 
         </StackPane>
@@ -130,14 +153,14 @@
 
     <!-- ══════════════════════════════════════════════════════════════════════
          BOTTOM STATUS BAR
-         Left:  "Book Title » Chapter » Subchapter   N/Total"
-         Right: "X.XX%"
+         Left: Book › Chapter   spread N/Total
+         Right: X.X%
          ══════════════════════════════════════════════════════════════════════ -->
     <bottom>
         <HBox styleClass="reader-statusbar" alignment="CENTER_LEFT">
             <Label fx:id="lblBreadcrumb" styleClass="reader-status-breadcrumb"/>
             <Region HBox.hgrow="ALWAYS"/>
-            <Label fx:id="lblProgress"   styleClass="reader-status-progress"/>
+            <Label fx:id="lblProgress" styleClass="reader-status-progress"/>
         </HBox>
     </bottom>
 
