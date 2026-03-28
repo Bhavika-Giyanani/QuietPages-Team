@@ -24,38 +24,68 @@ import java.io.File;
 import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * ReaderController — paginated EPUB reader using a CSS-column wrapper div
- * with CSS translateX pagination.
+ * ReaderController — JS-driven manual pagination. No CSS columns.
  *
- * LAYOUT MODEL (reliable in JavaFX WebKit):
+ * ── WHY CSS COLUMNS FAIL IN JAVAFX WEBKIT ────────────────────────────────────
  *
- * <html> — VW x VH, overflow:hidden (the viewport window)
- * <body> — VW x VH, overflow:hidden, no scroll, background only
- * <div id="qp-col-wrap"> — THE column container
- * width : VW px (one spread wide)
- * height : VH px
- * column-count : 2
- * overflow : visible → columns spill to the right
- * transform : translateX(-N*VW px) → pagination
+ * JavaFX embeds an old WebKit (roughly Safari 8-era).
+ * In this version:
+ * • scrollLeft on a column-count:2 element always returns 0 — no-op.
+ * • translateX on overflow:visible leaks the 3rd column into the viewport.
+ * • translateX on overflow:hidden clips correctly BUT scrollWidth reports
+ * clientWidth (i.e. it cannot see past the clip) so we cannot count pages.
+ * Every CSS-column approach hits one of these three bugs.
  *
- * WHY translateX instead of scrollLeft / window.scrollTo:
- * JavaFX WebKit does not reliably honour scrollLeft on <html> or <body>
- * when CSS columns are active — the visual position stays at 0.
- * CSS transform: translateX() moves the rendered box directly and works
- * perfectly in every WebKit version.
+ * ── THE SOLUTION: JS MANUAL PAGINATION ───────────────────────────────────────
  *
- * MEASUREMENT:
- * After the column reflow (setTimeout 320 ms) we read wrap.scrollWidth.
- * Because the wrapper has overflow:visible its scrollWidth equals the
- * full horizontal extent of all columns, so:
- * totalSpreads = Math.ceil(scrollWidth / VW)
+ * We abandon CSS columns entirely and do pagination in JavaScript:
+ *
+ * 1. Reset the document to a normal single-column flow inside a fixed-width,
+ * fixed-height container (pageW = VW/2, pageH = VH).
+ *
+ * 2. After reflow, iterate every direct child of <body>. Read each element's
+ * offsetTop + offsetHeight. Assign each element to a PAGE number:
+ * page = floor(element.offsetTop / pageH)
+ * If an element straddles a boundary (offsetTop < page*pageH but
+ * offsetTop+offsetHeight > page*pageH) it goes on the earlier page.
+ *
+ * 3. Wrap each page's elements in a <div class="qp-page"> absolutely
+ * positioned at left = page * pageW (for even pages = left side of spread)
+ * or left = pageW + (page-1)*pageW for odd pages (right side of spread).
+ * Actually simpler: place page P at left = P * pageW, top = 0,
+ * width = pageW, height = pageH, overflow = hidden.
+ *
+ * 4. A "spread" shows page 2N (left) and page 2N+1 (right) simultaneously.
+ * The outer container is VW wide, overflow:hidden.
+ * To show spread S, set container.scrollLeft = S * VW.
+ * But since each .qp-page is absolutely positioned at left=P*pageW,
+ * the whole layout is already a horizontal strip — we just clip it.
+ *
+ * 5. Navigation: advance spread index, update which pages are visible.
+ * No reflow. Instant.
+ *
+ * This is 100% immune to the CSS column bugs because we never use
+ * column-count, column-gap, or column-fill.
+ *
+ * ── SPREAD / PAGE RELATIONSHIP ───────────────────────────────────────────────
+ *
+ * pageW = VW / 2 (half the WebView width)
+ * pageH = VH (full WebView height)
+ * spread S shows pages 2S and 2S+1
+ * totalPages = number of .qp-page divs created
+ * totalSpreads = ceil(totalPages / 2)
+ *
+ * ── CHAPTER BOUNDARIES ───────────────────────────────────────────────────────
+ *
+ * Next at last spread → Java loads next chapter at spread 0.
+ * Prev at spread 0 → Java loads prev chapter at LAST_SPREAD
+ * (resolved to totalSpreads-1 after pagination).
  */
 public class ReaderController {
 
-    // ── FXML ─────────────────────────────────────────────────────────────────
+    // ── FXML ──────────────────────────────────────────────────────────────────
     @FXML
     private BorderPane readerRoot;
     @FXML
@@ -95,6 +125,7 @@ public class ReaderController {
     private Book book;
     private EpubRenderer renderer;
     private ReaderTheme theme = new ReaderTheme();
+
     private int spineIndex = 0;
     private int totalChapters = 0;
     private int currentSpread = 0;
@@ -102,20 +133,18 @@ public class ReaderController {
     private boolean fullscreen = false;
     private Runnable onBackCallback;
 
-    private final AtomicBoolean turning = new AtomicBoolean(false);
-    private final AtomicInteger jumpSpread = new AtomicInteger(0);
-    private volatile boolean layoutPending = false;
+    private static final int LAST_SPREAD = Integer.MAX_VALUE;
+    private int pendingSpread = 0;
 
-    /**
-     * Solid dark pane shown on top of WebView during chapter load to hide flash.
-     */
+    private final AtomicBoolean busy = new AtomicBoolean(false);
+
+    /** Debounce timer for resize/fullscreen re-pagination. */
+    private java.util.Timer resizeDebounceTimer = null;
+
     private StackPane transitionOverlay;
-
     private Popup tocPopup;
     private static final String ID_SEARCH = "qp-search-popup";
     private static final String ID_STYLE = "qp-style-popup";
-
-    private static final double COLUMN_GAP = 48.0;
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
@@ -141,10 +170,9 @@ public class ReaderController {
         };
         task.setOnSucceeded(e -> Platform.runLater(() -> {
             totalChapters = renderer.getTotalChapters();
-            double progress = book.getReadingProgress();
+            double saved = book.getReadingProgress();
             spineIndex = Math.max(0, Math.min(
-                    (int) (progress * Math.max(1, totalChapters)), totalChapters - 1));
-            jumpSpread.set(0);
+                    (int) (saved * Math.max(1, totalChapters)), totalChapters - 1));
             loadChapter(spineIndex, 0);
         }));
         task.setOnFailed(e -> Platform.runLater(
@@ -152,7 +180,7 @@ public class ReaderController {
         new Thread(task, "epub-loader").start();
     }
 
-    // ── WebView ───────────────────────────────────────────────────────────────
+    // ── Build WebView ─────────────────────────────────────────────────────────
     private void buildWebView() {
         webView = new WebView();
         engine = webView.getEngine();
@@ -162,44 +190,42 @@ public class ReaderController {
         HBox.setHgrow(webView, Priority.ALWAYS);
         webViewContainer.getChildren().add(webView);
 
-        // Transition overlay — covers chapter-load flash
         transitionOverlay = new StackPane();
-        transitionOverlay.setStyle("-fx-background-color: #0D0D0D;");
+        transitionOverlay.setStyle("-fx-background-color:#0D0D0D;");
         transitionOverlay.setVisible(false);
         transitionOverlay.setMouseTransparent(true);
 
+        // Document ready → run pagination
         engine.documentProperty().addListener((obs, oldDoc, newDoc) -> {
             if (newDoc == null)
                 return;
-            layoutPending = true;
-            turning.set(false);
-            Platform.runLater(() -> injectLayout(jumpSpread.get()));
+            busy.set(false);
+            // Short delay to let WebKit finish its initial layout pass
+            Platform.runLater(() -> runPagination(pendingSpread));
         });
 
+        // JS → Java messages
         engine.setOnStatusChanged(evt -> {
-            String data = evt.getData();
-            if (data == null)
-                return;
-            Platform.runLater(() -> handleStatus(data));
+            if (evt.getData() != null)
+                Platform.runLater(() -> handleStatus(evt.getData()));
         });
 
-        webView.widthProperty().addListener((obs, ov, nv) -> {
-            if (renderer != null && !layoutPending) {
-                layoutPending = true;
-                Platform.runLater(() -> injectLayout(currentSpread));
-            }
+        // Re-paginate on resize or fullscreen — debounced so rapid events
+        // (fullscreen fires width+height in quick succession) coalesce into one call.
+        webViewContainer.widthProperty().addListener((obs, ov, nv) -> {
+            if (renderer != null && nv.doubleValue() > 10)
+                scheduleRepaginate();
         });
-        webView.heightProperty().addListener((obs, ov, nv) -> {
-            if (renderer != null && !layoutPending) {
-                layoutPending = true;
-                Platform.runLater(() -> injectLayout(currentSpread));
-            }
+        webViewContainer.heightProperty().addListener((obs, ov, nv) -> {
+            if (renderer != null && nv.doubleValue() > 10)
+                scheduleRepaginate();
         });
     }
 
-    private void handleStatus(String data) {
-        if (data.startsWith("qp:layout:")) {
-            String[] p = data.split(":");
+    // ── Status handler ────────────────────────────────────────────────────────
+    private void handleStatus(String msg) {
+        if (msg.startsWith("qp:ready:")) {
+            String[] p = msg.split(":");
             if (p.length >= 4) {
                 try {
                     totalSpreads = Integer.parseInt(p[2]);
@@ -207,51 +233,48 @@ public class ReaderController {
                 } catch (NumberFormatException ignored) {
                 }
             }
-            layoutPending = false;
-            turning.set(false);
+            busy.set(false);
             hideTransitionOverlay();
             updateStatusBar();
             persistProgress();
 
-        } else if (data.startsWith("qp:turned:")) {
+        } else if (msg.startsWith("qp:turned:")) {
             try {
-                currentSpread = Integer.parseInt(data.split(":")[2]);
+                currentSpread = Integer.parseInt(msg.split(":")[2]);
             } catch (NumberFormatException ignored) {
             }
-            layoutPending = false;
-            turning.set(false);
+            busy.set(false);
             updateStatusBar();
 
-        } else if ("qp:next-chapter".equals(data)) {
+        } else if ("qp:next-chapter".equals(msg)) {
             if (spineIndex + 1 < totalChapters) {
                 spineIndex++;
                 persistProgress();
                 loadChapter(spineIndex, 0);
             } else {
-                turning.set(false);
-                layoutPending = false;
+                busy.set(false);
             }
 
-        } else if ("qp:prev-chapter".equals(data)) {
+        } else if ("qp:prev-chapter".equals(msg)) {
             if (spineIndex > 0) {
                 spineIndex--;
                 persistProgress();
-                loadChapter(spineIndex, Integer.MAX_VALUE);
+                loadChapter(spineIndex, LAST_SPREAD);
             } else {
-                turning.set(false);
-                layoutPending = false;
+                busy.set(false);
             }
         }
     }
 
+    // ── Nav setup ─────────────────────────────────────────────────────────────
     private void setupNav() {
         readerStack.setFocusTraversable(true);
         readerStack.setOnMouseClicked(e -> readerStack.requestFocus());
         readerStack.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN)
-                doNextSpread();
+                doNext();
             if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP)
-                doPrevSpread();
+                doPrev();
         });
         webView.addEventFilter(ScrollEvent.SCROLL, e -> {
             e.consume();
@@ -259,17 +282,16 @@ public class ReaderController {
                     ? e.getDeltaY()
                     : -e.getDeltaX();
             if (d < 0)
-                doNextSpread();
+                doNext();
             else
-                doPrevSpread();
+                doPrev();
         });
     }
 
-    // ── Transition overlay ────────────────────────────────────────────────────
+    // ── Overlay ───────────────────────────────────────────────────────────────
     private void showTransitionOverlay() {
-        if (!readerStack.getChildren().contains(transitionOverlay)) {
+        if (!readerStack.getChildren().contains(transitionOverlay))
             readerStack.getChildren().add(transitionOverlay);
-        }
         transitionOverlay.setOpacity(1.0);
         transitionOverlay.setVisible(true);
     }
@@ -277,15 +299,15 @@ public class ReaderController {
     private void hideTransitionOverlay() {
         if (transitionOverlay == null)
             return;
-        javafx.animation.FadeTransition ft = new javafx.animation.FadeTransition(javafx.util.Duration.millis(150),
-                transitionOverlay);
+        javafx.animation.FadeTransition ft = new javafx.animation.FadeTransition(
+                javafx.util.Duration.millis(150), transitionOverlay);
         ft.setFromValue(1.0);
         ft.setToValue(0.0);
         ft.setOnFinished(e -> transitionOverlay.setVisible(false));
         ft.play();
     }
 
-    // ── Chapter loading ───────────────────────────────────────────────────────
+    // ── Chapter load ──────────────────────────────────────────────────────────
     private void loadChapter(int index, int targetSpread) {
         if (renderer == null)
             return;
@@ -293,9 +315,8 @@ public class ReaderController {
         spineIndex = index;
         currentSpread = 0;
         totalSpreads = 1;
-        jumpSpread.set(targetSpread);
-        turning.set(false);
-        layoutPending = true;
+        pendingSpread = targetSpread;
+        busy.set(false);
         showTransitionOverlay();
         try {
             engine.load(renderer.getChapterUrlWithTheme(index, theme));
@@ -305,224 +326,330 @@ public class ReaderController {
         }
     }
 
+    // ── Debounced re-paginate (used by resize / fullscreen listeners) ─────────
     /**
-     * Injects the pagination layout into the loaded chapter.
-     *
-     * Approach: wrap all body children in <div id="qp-col-wrap">, apply
-     * column CSS to it, measure its scrollWidth, then use
-     * CSS transform:translateX to navigate spreads.
-     *
-     * This bypasses WebKit's broken scrollLeft-on-root behaviour entirely.
+     * Cancels any pending re-pagination and schedules a new one 250 ms later.
+     * This collapses the burst of width+height events that fullscreen toggle
+     * produces into a single repagination call once the size has settled.
      */
-    private void injectLayout(int targetSpread) {
-        double vw = webView.getWidth();
-        double vh = webView.getHeight();
-        if (vw <= 0 || vh <= 0) {
-            Platform.runLater(() -> injectLayout(targetSpread));
+    private void scheduleRepaginate() {
+        if (resizeDebounceTimer != null) {
+            resizeDebounceTimer.cancel();
+        }
+        resizeDebounceTimer = new java.util.Timer(true);
+        resizeDebounceTimer.schedule(new java.util.TimerTask() {
+            @Override
+            public void run() {
+                Platform.runLater(() -> {
+                    busy.set(false); // clear any stale lock before repaginating
+                    runPagination(currentSpread);
+                });
+            }
+        }, 250);
+    }
+
+    // ── Core: scroll-clip pagination ─────────────────────────────────────────
+    /**
+     * Pagination strategy for JavaFX WebKit.
+     *
+     * DESIGN — two-clone viewport approach:
+     *
+     * • qp-col: one tall single-column div, PW wide, height:auto.
+     * Content reflows naturally. PAD_V padding is baked into the column
+     * itself (top and bottom of the whole content), NOT on the clip divs.
+     *
+     * • pageH = VH (clip viewport height, no padding subtracted)
+     * availH = VH - PAD_V*2 (usable text area per page)
+     *
+     * • For page P, the content slice shown is:
+     * from: P * availH (in content coordinates)
+     * to: P * availH + availH
+     * The clip div is VH tall with overflow:hidden.
+     * We shift qp-col's top so the slice aligns with the clip's
+     * visible area, accounting for PAD_V:
+     * col.top = PAD_V - P * availH
+     * (PAD_V offset moves content down so padding appears at the top
+     * of every page; subtracting P*availH scrolls to the right page.)
+     *
+     * • Left page = page 2*spread
+     * Right page = page 2*spread + 1
+     * colR is a clone of col scrolled to the right page.
+     *
+     * • Images are constrained BEFORE col is appended to body so WebKit
+     * respects the max-width/height during the reflow measurement pass.
+     */
+    private void runPagination(int targetSpread) {
+        double vw = webViewContainer.getWidth();
+        double vh = webViewContainer.getHeight();
+        if (vw < 10 || vh < 10) {
+            Platform.runLater(() -> runPagination(targetSpread));
             return;
         }
 
-        double gap = COLUMN_GAP;
+        double pageW = vw / 2.0;
+        double pageH = vh;
         double padH = theme.marginH;
-        double padV = 32.0;
-        int sentinel = Integer.MAX_VALUE;
+        double padV = 44.0; // top+bottom visual margin per page
+        // availH = text area per page (clip height minus top+bottom padding)
+        double availH = pageH - padV * 2.0;
 
-        // %% → literal % inside String.format
         String js = String.format("""
                 (function() {
-                    var VW = %f, VH = %f, GAP = %f, PAD_H = %f, PAD_V = %f;
-                    var TARGET = %d, SENTINEL = %d;
-
-                    var html = document.documentElement;
+                    var VW=%f, VH=%f, PW=%f, PH=%f, PAD_H=%f, PAD_V=%f, AVAIL_H=%f;
+                    var TARGET=%d, LAST=%d;
                     var body = document.body;
-                    if (!body) return;
+                    if (!body) { window.status='qp:ready:1:0'; return; }
 
-                    /* ── 1. html: viewport clip ── */
-                    html.style.cssText = [
-                        'margin:0!important',
-                        'padding:0!important',
-                        'width:'+VW+'px!important',
-                        'height:'+VH+'px!important',
-                        'overflow:hidden!important'
-                    ].join(';');
-
-                    /* ── 2. body: same size, no scroll, background only ── */
-                    var bodyBg = window.getComputedStyle(body).backgroundColor || '#0D0D0D';
-                    body.style.cssText = [
-                        'margin:0!important',
-                        'padding:0!important',
-                        'width:'+VW+'px!important',
-                        'height:'+VH+'px!important',
-                        'overflow:hidden!important',
-                        'background-color:'+bodyBg+'!important'
-                    ].join(';');
-
-                    /* ── 3. Create or reuse the wrapper div ── */
-                    var wrap = document.getElementById('qp-col-wrap');
-                    if (!wrap) {
-                        wrap = document.createElement('div');
-                        wrap.id = 'qp-col-wrap';
-                        /* Adopt every existing body child into wrap */
-                        var kids = Array.prototype.slice.call(body.childNodes);
-                        for (var k = 0; k < kids.length; k++) {
-                            wrap.appendChild(kids[k]);
-                        }
-                        body.appendChild(wrap);
+                    /* ── PHASE 0: tear down previous run ── */
+                    var oldOuter = document.getElementById('qp-outer');
+                    if (oldOuter) {
+                        var oldCol = document.getElementById('qp-col');
+                        var frag   = document.createDocumentFragment();
+                        if (oldCol) while (oldCol.firstChild) frag.appendChild(oldCol.firstChild);
+                        if (oldOuter.parentNode) oldOuter.parentNode.removeChild(oldOuter);
+                        body.appendChild(frag);
                     }
 
-                    /* ── 4. Apply column CSS to the wrapper ──
-                       overflow:visible is critical: the columns spill rightward
-                       so wrap.scrollWidth reflects the full multi-column extent. */
-                    wrap.setAttribute('style', [
-                        'box-sizing:border-box!important',
-                        'width:'+VW+'px!important',
-                        'height:'+VH+'px!important',
-                        'padding:'+PAD_V+'px '+PAD_H+'px!important',
-                        'column-count:2!important',
-                        'column-gap:'+GAP+'px!important',
-                        'column-fill:auto!important',
-                        '-webkit-column-count:2!important',
-                        '-webkit-column-gap:'+GAP+'px!important',
-                        '-webkit-column-fill:auto!important',
-                        'overflow:visible!important',
-                        'transform:translateX(0px)!important',
-                        '-webkit-transform:translateX(0px)!important',
-                        'will-change:transform!important',
-                        'position:relative!important'
-                    ].join(';'));
+                    /* ── PHASE 1: unlock html+body for unconstrained reflow ── */
+                    document.documentElement.style.cssText =
+                        'margin:0;padding:0;width:'+VW+'px;height:auto;overflow:visible;';
+                    body.style.cssText =
+                        'margin:0;padding:0;width:'+VW+'px;height:auto;overflow:visible;';
 
-                    /* ── 5. Constrain images so they don't break columns ── */
-                    var imgs = wrap.querySelectorAll('img,figure,svg,table');
-                    for (var i = 0; i < imgs.length; i++) {
-                        var el = imgs[i];
-                        el.style.setProperty('-webkit-column-break-inside','avoid','important');
-                        el.style.setProperty('break-inside',    'avoid',         'important');
-                        el.style.setProperty('page-break-inside','avoid',        'important');
-                        el.style.setProperty('max-width',       '100%%',         'important');
-                        el.style.setProperty('max-height',      (VH*0.78)+'px', 'important');
-                        el.style.setProperty('width',           'auto',          'important');
-                        el.style.setProperty('height',          'auto',          'important');
-                        el.style.setProperty('object-fit',      'contain',       'important');
-                        el.style.setProperty('display',         'block',         'important');
+                    /* ── PHASE 2: wrap content in qp-col ──
+                       Width = PW - 2*PAD_H  (inner text column)
+                       Left  = PAD_H         (horizontal margin)
+                       PAD_V top padding so first line has breathing room.
+                       PAD_V bottom padding so last line has breathing room.
+                       IMPORTANT: padding is on the col itself, NOT on the clip,
+                       so the PAD_V offset is consistent and easy to calculate. */
+                    var col = document.createElement('div');
+                    col.id  = 'qp-col';
+
+                    var innerW = PW - PAD_H * 2;
+
+                    col.style.cssText = [
+                        'position:relative',
+                        'top:0',
+                        'left:0',
+                        'width:'  + innerW + 'px',
+                        'height:auto',
+                        'padding-top:'    + PAD_V + 'px',
+                        'padding-bottom:' + PAD_V + 'px',
+                        'padding-left:0',
+                        'padding-right:0',
+                        'box-sizing:content-box',
+                        'overflow:visible'
+                    ].join(';');
+
+                    while (body.firstChild) col.appendChild(body.firstChild);
+
+                    /* Constrain media NOW, before appending to body,
+                       so the reflow measurement sees the constrained sizes. */
+                    var media = col.querySelectorAll('img,svg,video,table,figure');
+                    for (var m = 0; m < media.length; m++) {
+                        var me = media[m];
+                        me.style.setProperty('max-width',   innerW + 'px',         'important');
+                        me.style.setProperty('max-height',  (AVAIL_H * 0.88)+'px', 'important');
+                        me.style.setProperty('width',       'auto',                 'important');
+                        me.style.setProperty('height',      'auto',                 'important');
+                        me.style.setProperty('object-fit',  'contain',              'important');
+                        me.style.setProperty('display',     'block',                'important');
+                        me.style.setProperty('margin-left', 'auto',                 'important');
+                        me.style.setProperty('margin-right','auto',                 'important');
                     }
 
-                    /* ── 6. Wait for WebKit multi-column reflow then measure ──
-                       320 ms is intentional: requestAnimationFrame fires before
-                       multi-column layout is stable; a short setTimeout is needed. */
+                    body.appendChild(col);
+
+                    /* ── PHASE 3: wait for reflow then measure ── */
                     setTimeout(function() {
-                        var sw    = wrap.scrollWidth;
-                        var total = Math.max(1, Math.ceil(sw / VW));
 
-                        var landed = (TARGET === SENTINEL)
-                            ? total - 1
-                            : Math.min(TARGET, total - 1);
+                        /* scrollHeight includes the PAD_V*2 we added.
+                           Subtract them to get net content height. */
+                        var contentH     = col.scrollHeight - PAD_V * 2;
+                        var totalPages   = Math.max(2, Math.ceil(contentH / AVAIL_H));
+                        if (totalPages %% 2 !== 0) totalPages++;   /* always even for spread pairing */
+                        var totalSpreads = totalPages / 2;
+                        var landed = (TARGET === LAST)
+                            ? totalSpreads - 1
+                            : Math.min(TARGET, totalSpreads - 1);
 
-                        /* Translate to the target spread */
-                        var tx = landed * VW;
-                        var tfm = 'translateX(-'+tx+'px)';
-                        wrap.style.setProperty('transform',         tfm, 'important');
-                        wrap.style.setProperty('-webkit-transform', tfm, 'important');
+                        /* ── PHASE 4: build outer + two clip viewports ──
+                           Clip divs are PW × VH, overflow:hidden, NO padding.
+                           Padding lives in qp-col, so the top offset formula is:
+                             col.top = -( pageIndex * AVAIL_H )
+                           The first PAD_V px of col content is the top padding —
+                           it appears naturally at the top of the clip on page 0,
+                           and reappears correctly after each shift because
+                           top-of-col == top-of-clip when top=0. */
+                        var outer = document.createElement('div');
+                        outer.id  = 'qp-outer';
+                        outer.style.cssText = [
+                            'position:absolute',
+                            'top:0','left:0',
+                            'width:'  + VW + 'px',
+                            'height:' + VH + 'px',
+                            'overflow:hidden',
+                            'background:inherit'
+                        ].join(';');
 
-                        /* Store globals so page-turn JS can update cheaply */
-                        window._qpVW           = VW;
-                        window._qpTotalSpreads = total;
-                        window._qpCurSpread    = landed;
+                        /* Left clip */
+                        var clipL = document.createElement('div');
+                        clipL.id  = 'qp-clip-l';
+                        clipL.style.cssText = [
+                            'position:absolute',
+                            'top:0','left:' + PAD_H + 'px',
+                            'width:'  + innerW + 'px',
+                            'height:' + VH + 'px',
+                            'overflow:hidden'
+                        ].join(';');
 
-                        /* Report to Java */
-                        window.status = 'qp:layout:' + total + ':' + landed;
+                        /* Right clip */
+                        var clipR = document.createElement('div');
+                        clipR.id  = 'qp-clip-r';
+                        clipR.style.cssText = [
+                            'position:absolute',
+                            'top:0','left:' + (PW + PAD_H) + 'px',
+                            'width:'  + innerW + 'px',
+                            'height:' + VH + 'px',
+                            'overflow:hidden'
+                        ].join(';');
 
-                    }, 320);
+                        var colR = col.cloneNode(true);
+                        colR.id  = 'qp-col-r';
+
+                        clipL.appendChild(col);
+                        clipR.appendChild(colR);
+                        outer.appendChild(clipL);
+                        outer.appendChild(clipR);
+
+                        body.style.cssText = [
+                            'margin:0!important','padding:0!important',
+                            'position:relative!important',
+                            'width:'  + VW + 'px!important',
+                            'height:' + VH + 'px!important',
+                            'overflow:hidden!important'
+                        ].join(';');
+                        document.documentElement.style.cssText = [
+                            'margin:0!important','padding:0!important',
+                            'width:'  + VW + 'px!important',
+                            'height:' + VH + 'px!important',
+                            'overflow:hidden!important'
+                        ].join(';');
+
+                        body.appendChild(outer);
+
+                        /* ── PHASE 5: scroll to target spread ──
+                           Page P offset: top = -(P * AVAIL_H)
+                           The PAD_V at the top of col means:
+                             page 0: top=0    → clip shows [0 .. VH], col starts at top of clip ✓
+                             page 1: top=-AVAIL_H → clip shows [AVAIL_H .. AVAIL_H+VH]
+                                     col top padding means content[0..PAD_V] is above clip ✓
+                           The PAD_V padding makes the top/bottom margins appear on every page. */
+                        var leftPage  = landed * 2;
+                        var rightPage = landed * 2 + 1;
+                        col.style.top  = -(leftPage  * AVAIL_H) + 'px';
+                        colR.style.top = -(rightPage * AVAIL_H) + 'px';
+
+                        window._qpTotal  = totalSpreads;
+                        window._qpCur    = landed;
+                        window._qpAvailH = AVAIL_H;
+                        window._qpCol    = col;
+                        window._qpColR   = colR;
+
+                        window.status = 'qp:ready:' + totalSpreads + ':' + landed;
+
+                    }, 600);
                 })();
                 """,
-                vw, vh, gap, padH, padV, targetSpread, sentinel);
+                vw, vh, pageW, pageH, padH, padV, availH, targetSpread, LAST_SPREAD);
 
         try {
             engine.executeScript(js);
         } catch (Exception e) {
-            System.err.println("[Reader] injectLayout error: " + e.getMessage());
-            layoutPending = false;
+            System.err.println("[Reader] pagination error: " + e.getMessage());
+            busy.set(false);
             hideTransitionOverlay();
         }
     }
 
-    // ── Navigation ────────────────────────────────────────────────────────────
+    // ── Fast page-turn (no reflow) ────────────────────────────────────────────
+    // Page P offset formula: col.top = -(P * AVAIL_H)
+    // Left page of spread S = page 2*S
+    // Right page of spread S = page 2*S + 1
+    // The PAD_V baked into qp-col top/bottom padding produces the visual
+    // margin automatically — no extra arithmetic needed here.
+    private static final String JS_NEXT = """
+            (function() {
+                var col    = window._qpCol;
+                var colR   = window._qpColR;
+                if (!col || !colR) { window.status=''; window.status='qp:next-chapter'; return; }
+                var cur    = window._qpCur    !== undefined ? window._qpCur    : 0;
+                var total  = window._qpTotal  !== undefined ? window._qpTotal  : 1;
+                var availH = window._qpAvailH !== undefined ? window._qpAvailH : 700;
+                if (cur + 1 < total) {
+                    var next      = cur + 1;
+                    var leftPage  = next * 2;
+                    var rightPage = next * 2 + 1;
+                    col.style.top  = -(leftPage  * availH) + 'px';
+                    colR.style.top = -(rightPage * availH) + 'px';
+                    window._qpCur = next;
+                    window.status = ''; window.status = 'qp:turned:' + next;
+                } else {
+                    window.status = ''; window.status = 'qp:next-chapter';
+                }
+            })();
+            """;
+
+    private static final String JS_PREV = """
+            (function() {
+                var col    = window._qpCol;
+                var colR   = window._qpColR;
+                if (!col || !colR) { window.status=''; window.status='qp:prev-chapter'; return; }
+                var cur    = window._qpCur    !== undefined ? window._qpCur    : 0;
+                var availH = window._qpAvailH !== undefined ? window._qpAvailH : 700;
+                if (cur > 0) {
+                    var prev      = cur - 1;
+                    var leftPage  = prev * 2;
+                    var rightPage = prev * 2 + 1;
+                    col.style.top  = -(leftPage  * availH) + 'px';
+                    colR.style.top = -(rightPage * availH) + 'px';
+                    window._qpCur = prev;
+                    window.status = ''; window.status = 'qp:turned:' + prev;
+                } else {
+                    window.status = ''; window.status = 'qp:prev-chapter';
+                }
+            })();
+            """;
+
+    // ── Navigation entry points ───────────────────────────────────────────────
     @FXML
     void onNextPage() {
-        doNextSpread();
+        doNext();
     }
 
     @FXML
     void onPrevPage() {
-        doPrevSpread();
+        doPrev();
     }
 
-    /**
-     * Advances one spread within the current chapter by updating translateX.
-     * If already on the last spread, signals Java to load the next chapter.
-     * No page reload — instant, no flicker.
-     */
-    private void doNextSpread() {
-        if (layoutPending)
+    private void doNext() {
+        if (!busy.compareAndSet(false, true))
             return;
-        if (!turning.compareAndSet(false, true))
-            return;
-
         try {
-            engine.executeScript("""
-                    (function() {
-                        var cur   = (window._qpCurSpread    !== undefined) ? window._qpCurSpread    : 0;
-                        var total = (window._qpTotalSpreads !== undefined) ? window._qpTotalSpreads : 1;
-                        var vw    = (window._qpVW           !== undefined) ? window._qpVW           : 800;
-                        var wrap  = document.getElementById('qp-col-wrap');
-                        if (!wrap) { window.status = 'qp:next-chapter'; return; }
-                        if (cur + 1 < total) {
-                            var next = cur + 1;
-                            window._qpCurSpread = next;
-                            var tfm = 'translateX(-' + (next * vw) + 'px)';
-                            wrap.style.setProperty('transform',         tfm, 'important');
-                            wrap.style.setProperty('-webkit-transform', tfm, 'important');
-                            window.status = 'qp:turned:' + next;
-                        } else {
-                            window.status = 'qp:next-chapter';
-                        }
-                    })();
-                    """);
+            engine.executeScript(JS_NEXT);
         } catch (Exception e) {
-            turning.set(false);
+            busy.set(false);
         }
     }
 
-    /**
-     * Goes back one spread within the current chapter.
-     * If on spread 0, signals Java to load the previous chapter at its last spread.
-     */
-    private void doPrevSpread() {
-        if (layoutPending)
+    private void doPrev() {
+        if (!busy.compareAndSet(false, true))
             return;
-        if (!turning.compareAndSet(false, true))
-            return;
-
         try {
-            engine.executeScript("""
-                    (function() {
-                        var cur  = (window._qpCurSpread !== undefined) ? window._qpCurSpread : 0;
-                        var vw   = (window._qpVW        !== undefined) ? window._qpVW        : 800;
-                        var wrap = document.getElementById('qp-col-wrap');
-                        if (!wrap) { window.status = 'qp:prev-chapter'; return; }
-                        if (cur > 0) {
-                            var prev = cur - 1;
-                            window._qpCurSpread = prev;
-                            var tfm = 'translateX(-' + (prev * vw) + 'px)';
-                            wrap.style.setProperty('transform',         tfm, 'important');
-                            wrap.style.setProperty('-webkit-transform', tfm, 'important');
-                            window.status = 'qp:turned:' + prev;
-                        } else {
-                            window.status = 'qp:prev-chapter';
-                        }
-                    })();
-                    """);
+            engine.executeScript(JS_PREV);
         } catch (Exception e) {
-            turning.set(false);
+            busy.set(false);
         }
     }
 
@@ -555,9 +682,9 @@ public class ReaderController {
 
     @FXML
     private void onSearch() {
-        Node existing = readerStack.lookup("#" + ID_SEARCH);
-        if (existing != null) {
-            readerStack.getChildren().remove(existing);
+        Node ex = readerStack.lookup("#" + ID_SEARCH);
+        if (ex != null) {
+            readerStack.getChildren().remove(ex);
             btnSearch.getStyleClass().remove("active");
             clearSearchHighlights();
         } else {
@@ -569,9 +696,9 @@ public class ReaderController {
 
     @FXML
     private void onTextStyle() {
-        Node existing = readerStack.lookup("#" + ID_STYLE);
-        if (existing != null) {
-            readerStack.getChildren().remove(existing);
+        Node ex = readerStack.lookup("#" + ID_STYLE);
+        if (ex != null) {
+            readerStack.getChildren().remove(ex);
             btnTextStyle.getStyleClass().remove("active");
         } else {
             closeAllPopups();
@@ -588,34 +715,22 @@ public class ReaderController {
         fullscreen = !fullscreen;
         s.setFullScreen(fullscreen);
         iconFullscreen.setIconLiteral(fullscreen ? "fas-compress" : "fas-expand");
-        Platform.runLater(() -> {
-            layoutPending = true;
-            injectLayout(currentSpread);
-        });
+        // width/height listeners re-paginate automatically
     }
 
     // ── TOC popup ─────────────────────────────────────────────────────────────
     private void showTocPopup(List<TocEntry> tocList) {
         VBox content = new VBox(0);
-        content.setStyle("""
-                -fx-background-color: #1C1C1C;
-                -fx-border-color: #303030;
-                -fx-border-width: 1;
-                -fx-border-radius: 8;
-                -fx-background-radius: 8;
-                -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.85), 24, 0, 0, 8);
-                """);
+        content.setStyle("-fx-background-color:#1C1C1C;-fx-border-color:#303030;" +
+                "-fx-border-width:1;-fx-border-radius:8;-fx-background-radius:8;" +
+                "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.85),24,0,0,8);");
         content.setPrefWidth(300);
         content.setMaxHeight(460);
 
         Label header = new Label("Table of Contents");
-        header.setStyle("""
-                -fx-text-fill: #DDDDDD; -fx-font-size: 13px; -fx-font-weight: bold;
-                -fx-padding: 12 16 11 16;
-                -fx-border-color: transparent transparent #303030 transparent;
-                -fx-border-width: 0 0 1 0;
-                -fx-background-color: #232323; -fx-background-radius: 8 8 0 0;
-                """);
+        header.setStyle("-fx-text-fill:#DDDDDD;-fx-font-size:13px;-fx-font-weight:bold;" +
+                "-fx-padding:12 16 11 16;-fx-border-color:transparent transparent #303030 transparent;" +
+                "-fx-border-width:0 0 1 0;-fx-background-color:#232323;-fx-background-radius:8 8 0 0;");
         header.setMaxWidth(Double.MAX_VALUE);
 
         VBox list = new VBox(0);
@@ -623,7 +738,7 @@ public class ReaderController {
 
         ScrollPane scroll = new ScrollPane(list);
         scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
+        scroll.setStyle("-fx-background-color:transparent;-fx-border-color:transparent;");
         scroll.getStylesheets().add(
                 getClass().getResource("/com/quietpages/quietpages/library.css").toExternalForm());
         VBox.setVgrow(scroll, Priority.ALWAYS);
@@ -662,19 +777,15 @@ public class ReaderController {
             row.setOnMouseClicked(e -> {
                 if (tocPopup != null)
                     tocPopup.hide();
-                navigateToTocEntry(fe);
+                int idx = renderer.findSpineIndex(fe.resolvedUrl != null
+                        ? fe.resolvedUrl.split("#")[0]
+                        : "");
+                loadChapter(idx, 0);
             });
             list.getChildren().add(row);
             if (!entry.children.isEmpty())
                 populateTocList(list, entry.children, depth + 1);
         }
-    }
-
-    private void navigateToTocEntry(TocEntry entry) {
-        if (entry.resolvedUrl == null || entry.resolvedUrl.isBlank())
-            return;
-        int idx = renderer.findSpineIndex(entry.resolvedUrl.split("#")[0]);
-        loadChapter(idx, 0);
     }
 
     // ── Search popup ──────────────────────────────────────────────────────────
@@ -692,15 +803,13 @@ public class ReaderController {
         field.setMaxWidth(Double.MAX_VALUE);
 
         ToggleButton btnMC = new ToggleButton("Aa");
-        ToggleButton btnWW = new ToggleButton("Ab|");
         btnMC.getStyleClass().add("reader-search-toggle");
+        ToggleButton btnWW = new ToggleButton("Ab|");
         btnWW.getStyleClass().add("reader-search-toggle");
-
         FontIcon gi = new FontIcon("fas-arrow-right");
         gi.setIconSize(12);
         Button btnGo = new Button("", gi);
         btnGo.getStyleClass().add("reader-search-icon-btn");
-
         FontIcon ci = new FontIcon("fas-times");
         ci.setIconSize(12);
         Button btnClose = new Button("", ci);
@@ -710,12 +819,10 @@ public class ReaderController {
             btnSearch.getStyleClass().remove("active");
             clearSearchHighlights();
         });
-
         Region sp = new Region();
         HBox.setHgrow(sp, Priority.ALWAYS);
         HBox row2 = new HBox(6, btnMC, btnWW, sp, btnGo, btnClose);
         row2.setAlignment(Pos.CENTER_LEFT);
-
         Label resultLbl = new Label();
         resultLbl.setStyle("-fx-font-size:11px;");
         popup.getChildren().addAll(field, row2, resultLbl);
@@ -731,12 +838,10 @@ public class ReaderController {
             String safe = term.replace("\\", "\\\\").replace("'", "\\'");
             try {
                 boolean found = Boolean.parseBoolean(String.valueOf(engine.executeScript(
-                        "window.find('" + safe + "'," + btnMC.isSelected()
-                                + ",false,true," + btnWW.isSelected() + ")")));
+                        "window.find('" + safe + "'," + btnMC.isSelected() + ",false,true," + btnWW.isSelected()
+                                + ")")));
                 resultLbl.setText(found ? "✓ Match found" : "✗ No matches");
-                resultLbl.getStyleClass().setAll(found
-                        ? "reader-search-result-found"
-                        : "reader-search-result-none");
+                resultLbl.getStyleClass().setAll(found ? "reader-search-result-found" : "reader-search-result-none");
             } catch (Exception ex) {
                 resultLbl.setText("Search error");
             }
@@ -761,16 +866,11 @@ public class ReaderController {
         popup.setPrefWidth(300);
         popup.setMaxWidth(300);
 
-        Label ll = mkLbl("Line spacing");
         Slider sl = mkSlider(1.2, 3.0, theme.lineHeight);
-        Label lf = mkLbl("Font size");
         Slider sf = mkSlider(12, 28, theme.fontSize);
-        Label lp = mkLbl("Para spacing");
         Slider sp = mkSlider(0, 3.0, theme.paragraphSpace);
-        Label lm = mkLbl("Page margin");
         Slider sm = mkSlider(16, 80, theme.marginH);
 
-        Label la = mkLbl("Alignment");
         ToggleGroup ag = new ToggleGroup();
         ToggleButton taL = mkAlignBtn("fas-align-left", "left", ag);
         ToggleButton taC = mkAlignBtn("fas-align-center", "center", ag);
@@ -798,7 +898,6 @@ public class ReaderController {
                     .findFirst().ifPresent(ag::selectToggle);
             reloadCurrentChapter();
         });
-
         FontIcon ci2 = new FontIcon("fas-times");
         ci2.setIconSize(11);
         Button btnClose = new Button("", ci2);
@@ -811,7 +910,11 @@ public class ReaderController {
         HBox.setHgrow(rx, Priority.ALWAYS);
         HBox br = new HBox(8, btnReset, rx, btnClose);
         br.setAlignment(Pos.CENTER_LEFT);
-        popup.getChildren().addAll(ll, sl, lf, sf, lp, sp, lm, sm, la, ar, br);
+
+        popup.getChildren().addAll(
+                mkLbl("Line spacing"), sl, mkLbl("Font size"), sf,
+                mkLbl("Para spacing"), sp, mkLbl("Page margin"), sm,
+                mkLbl("Alignment"), ar, br);
         StackPane.setAlignment(popup, Pos.TOP_RIGHT);
         StackPane.setMargin(popup, new Insets(60, 8, 0, 0));
         readerStack.getChildren().add(popup);
@@ -841,7 +944,6 @@ public class ReaderController {
     }
 
     private void reloadCurrentChapter() {
-        layoutPending = true;
         loadChapter(spineIndex, currentSpread);
     }
 
@@ -856,9 +958,10 @@ public class ReaderController {
                 : title + "  ›  " + chapName;
         crumb += "     " + (currentSpread + 1) + " / " + totalSpreads;
         lblBreadcrumb.setText(crumb);
-
         double pct = totalChapters > 0
-                ? ((spineIndex + (totalSpreads > 1 ? (double) currentSpread / totalSpreads : 0.0))
+                ? ((spineIndex + (totalSpreads > 1
+                        ? (double) currentSpread / totalSpreads
+                        : 0.0))
                         / totalChapters) * 100.0
                 : 0.0;
         lblProgress.setText(String.format("%.1f%%", pct));
@@ -884,8 +987,8 @@ public class ReaderController {
         double p = (double) spineIndex / totalChapters;
         book.setReadingProgress(p);
         try (PreparedStatement ps = DatabaseManager.getInstance().getConnection()
-                .prepareStatement("UPDATE books SET reading_progress=?, reading_status='READING'," +
-                        " last_read=datetime('now') WHERE id=?")) {
+                .prepareStatement("UPDATE books SET reading_progress=?,reading_status='READING'," +
+                        "last_read=datetime('now') WHERE id=?")) {
             ps.setDouble(1, p);
             ps.setInt(2, book.getId());
             ps.executeUpdate();
@@ -894,7 +997,7 @@ public class ReaderController {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Utility ───────────────────────────────────────────────────────────────
     private void closeAllPopups() {
         for (String id : new String[] { ID_SEARCH, ID_STYLE }) {
             Node n = readerStack.lookup("#" + id);
@@ -951,7 +1054,6 @@ public class ReaderController {
                 "<b>Could not open book</b><br><br>" + msg + "</body></html>", "text/html");
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
     public ReaderTheme getTheme() {
         return theme;
     }
