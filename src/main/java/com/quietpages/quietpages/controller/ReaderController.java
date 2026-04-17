@@ -348,35 +348,10 @@ public class ReaderController {
         }, 250);
     }
 
-    // ── Core: scroll-clip pagination ─────────────────────────────────────────
+    // ── Core: element-grouping pagination ────────────────────────────────────
     /**
-     * Pagination strategy for JavaFX WebKit.
-     *
-     * DESIGN — two-clone viewport approach:
-     *
-     * • qp-col: one tall single-column div, PW wide, height:auto.
-     * Content reflows naturally. PAD_V padding is baked into the column
-     * itself (top and bottom of the whole content), NOT on the clip divs.
-     *
-     * • pageH = VH (clip viewport height, no padding subtracted)
-     * availH = VH - PAD_V*2 (usable text area per page)
-     *
-     * • For page P, the content slice shown is:
-     * from: P * availH (in content coordinates)
-     * to: P * availH + availH
-     * The clip div is VH tall with overflow:hidden.
-     * We shift qp-col's top so the slice aligns with the clip's
-     * visible area, accounting for PAD_V:
-     * col.top = PAD_V - P * availH
-     * (PAD_V offset moves content down so padding appears at the top
-     * of every page; subtracting P*availH scrolls to the right page.)
-     *
-     * • Left page = page 2*spread
-     * Right page = page 2*spread + 1
-     * colR is a clone of col scrolled to the right page.
-     *
-     * • Images are constrained BEFORE col is appended to body so WebKit
-     * respects the max-width/height during the reflow measurement pass.
+     * APPROACH: physically move every block element into its own .qp-page div.
+     * No clipping of a scrolling column. No coordinate math. No bleed possible.
      */
     private void runPagination(int targetSpread) {
         double vw = webViewContainer.getWidth();
@@ -387,182 +362,297 @@ public class ReaderController {
         }
 
         double pageW = vw / 2.0;
-        double pageH = vh;
         double padH = theme.marginH;
-        double padV = 44.0; // top+bottom visual margin per page
-        // availH = text area per page (clip height minus top+bottom padding)
-        double availH = pageH - padV * 2.0;
+        double padV = 44.0;
+        double availH = vh - padV * 2.0;
 
         String js = String.format("""
                 (function() {
-                    var VW=%f, VH=%f, PW=%f, PH=%f, PAD_H=%f, PAD_V=%f, AVAIL_H=%f;
+                    var VW=%f, VH=%f, PW=%f, PAD_H=%f, PAD_V=%f, AVAIL_H=%f;
                     var TARGET=%d, LAST=%d;
                     var body = document.body;
                     if (!body) { window.status='qp:ready:1:0'; return; }
 
                     /* ── PHASE 0: tear down previous run ── */
-                    var oldOuter = document.getElementById('qp-outer');
-                    if (oldOuter) {
-                        var oldCol = document.getElementById('qp-col');
-                        var frag   = document.createDocumentFragment();
-                        if (oldCol) while (oldCol.firstChild) frag.appendChild(oldCol.firstChild);
-                        if (oldOuter.parentNode) oldOuter.parentNode.removeChild(oldOuter);
-                        body.appendChild(frag);
-                    }
+                    var oldWrap = document.getElementById('qp-wrap');
+                    if (oldWrap) oldWrap.parentNode.removeChild(oldWrap);
 
-                    /* ── PHASE 1: unlock html+body for unconstrained reflow ── */
-                    document.documentElement.style.cssText =
-                        'margin:0;padding:0;width:'+VW+'px;height:auto;overflow:visible;';
-                    body.style.cssText =
-                        'margin:0;padding:0;width:'+VW+'px;height:auto;overflow:visible;';
-
-                    /* ── PHASE 2: wrap content in qp-col ──
-                       Width = PW - 2*PAD_H  (inner text column)
-                       Left  = PAD_H         (horizontal margin)
-                       PAD_V top padding so first line has breathing room.
-                       PAD_V bottom padding so last line has breathing room.
-                       IMPORTANT: padding is on the col itself, NOT on the clip,
-                       so the PAD_V offset is consistent and easy to calculate. */
-                    var col = document.createElement('div');
-                    col.id  = 'qp-col';
-
+                    /* ── PHASE 1: single-column reflow at half-viewport width ── */
                     var innerW = PW - PAD_H * 2;
+                    document.documentElement.style.cssText =
+                        'margin:0;padding:0;width:'+PW+'px;height:auto;overflow:visible;';
+                    body.style.cssText =
+                        'margin:0;padding:0;box-sizing:border-box;' +
+                        'width:'+innerW+'px;height:auto;overflow:visible;' +
+                        'margin-left:'+PAD_H+'px;';
 
-                    col.style.cssText = [
-                        'position:relative',
-                        'top:0',
-                        'left:0',
-                        'width:'  + innerW + 'px',
-                        'height:auto',
-                        'padding-top:'    + PAD_V + 'px',
-                        'padding-bottom:' + PAD_V + 'px',
-                        'padding-left:0',
-                        'padding-right:0',
-                        'box-sizing:content-box',
-                        'overflow:visible'
-                    ].join(';');
-
-                    while (body.firstChild) col.appendChild(body.firstChild);
-
-                    /* Constrain media NOW, before appending to body,
-                       so the reflow measurement sees the constrained sizes. */
-                    var media = col.querySelectorAll('img,svg,video,table,figure');
-                    for (var m = 0; m < media.length; m++) {
-                        var me = media[m];
-                        me.style.setProperty('max-width',   innerW + 'px',         'important');
-                        me.style.setProperty('max-height',  (AVAIL_H * 0.88)+'px', 'important');
-                        me.style.setProperty('width',       'auto',                 'important');
-                        me.style.setProperty('height',      'auto',                 'important');
-                        me.style.setProperty('object-fit',  'contain',              'important');
-                        me.style.setProperty('display',     'block',                'important');
-                        me.style.setProperty('margin-left', 'auto',                 'important');
-                        me.style.setProperty('margin-right','auto',                 'important');
+                    /* Constrain media to fit one page */
+                    var allMedia = body.querySelectorAll('img,svg,video,figure,table');
+                    for (var m = 0; m < allMedia.length; m++) {
+                        var el = allMedia[m];
+                        el.style.setProperty('max-width',  innerW+'px',         'important');
+                        el.style.setProperty('max-height', (AVAIL_H*0.85)+'px', 'important');
+                        el.style.setProperty('width',      'auto',               'important');
+                        el.style.setProperty('height',     'auto',               'important');
+                        el.style.setProperty('object-fit', 'contain',            'important');
+                        el.style.setProperty('display',    'block',              'important');
                     }
 
-                    body.appendChild(col);
-
-                    /* ── PHASE 3: wait for reflow then measure ── */
+                    /* ── PHASE 2: wait for reflow ── */
                     setTimeout(function() {
 
-                        /* scrollHeight includes the PAD_V*2 we added.
-                           Subtract them to get net content height. */
-                        var contentH     = col.scrollHeight - PAD_V * 2;
-                        var totalPages   = Math.max(2, Math.ceil(contentH / AVAIL_H));
-                        if (totalPages %% 2 !== 0) totalPages++;   /* always even for spread pairing */
-                        var totalSpreads = totalPages / 2;
-                        var landed = (TARGET === LAST)
-                            ? totalSpreads - 1
-                            : Math.min(TARGET, totalSpreads - 1);
+                        /* ────────────────────────────────────────────────────────────
+                           STEP A: Collect block units from the full document tree.
+                           We recurse into wrapper divs/sections to find real content
+                           blocks (p, h1-h6, li, blockquote, img, figure, hr, pre).
+                           ──────────────────────────────────────────────────────────── */
+                        var ATOMIC = {IMG:1,SVG:1,FIGURE:1,HR:1,TABLE:1,PRE:1,OL:1,UL:1};
+                        var BLOCK  = {P:1,H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,
+                                      LI:1,BLOCKQUOTE:1,FIGCAPTION:1};
+                        var blocks = [];
 
-                        /* ── PHASE 4: build outer + two clip viewports ──
-                           Clip divs are PW × VH, overflow:hidden, NO padding.
-                           Padding lives in qp-col, so the top offset formula is:
-                             col.top = -( pageIndex * AVAIL_H )
-                           The first PAD_V px of col content is the top padding —
-                           it appears naturally at the top of the clip on page 0,
-                           and reappears correctly after each shift because
-                           top-of-col == top-of-clip when top=0. */
-                        var outer = document.createElement('div');
-                        outer.id  = 'qp-outer';
-                        outer.style.cssText = [
-                            'position:absolute',
-                            'top:0','left:0',
-                            'width:'  + VW + 'px',
-                            'height:' + VH + 'px',
-                            'overflow:hidden',
-                            'background:inherit'
+                        function collectBlocks(node) {
+                            if (node.nodeType !== 1) return;
+                            var tag = node.tagName;
+                            if (ATOMIC[tag] || BLOCK[tag]) {
+                                if (node.getBoundingClientRect().height > 0)
+                                    blocks.push(node);
+                                return;
+                            }
+                            var kids = node.childNodes;
+                            for (var i = 0; i < kids.length; i++) collectBlocks(kids[i]);
+                        }
+                        var bodyKids = body.childNodes;
+                        for (var i = 0; i < bodyKids.length; i++) collectBlocks(bodyKids[i]);
+
+                        if (blocks.length === 0) {
+                            window.status = 'qp:ready:1:0'; return;
+                        }
+
+                        /* ────────────────────────────────────────────────────────────
+                           STEP B: Split any block taller than AVAIL_H at word
+                           boundaries using Range.getClientRects().
+
+                           For each text node inside the block we iterate word by word,
+                           using a Range to measure where each word ends in viewport Y.
+                           When the next word would push past the current page's bottom,
+                           we cut the text node there: leave the words up-to-cut in a
+                           clone of the original element, and continue with the rest in
+                           a new clone appended after it in the DOM.
+
+                           After splitting, the block is replaced by 2+ shorter blocks
+                           each <= AVAIL_H, all still in the DOM for measurement.
+                           ──────────────────────────────────────────────────────────── */
+
+                        function splitBlock(el, pageTop, pageBot) {
+                            /* Walk all text nodes inside el. Find the last word that
+                               fits within pageBot. Split at that position.
+                               Returns the remainder element (or null if all fits). */
+                            var range = document.createRange();
+                            var textNodes = [];
+                            function gatherText(n) {
+                                if (n.nodeType === 3 && n.nodeValue.trim().length > 0)
+                                    textNodes.push(n);
+                                else if (n.nodeType === 1) {
+                                    var kids = n.childNodes;
+                                    for (var i = 0; i < kids.length; i++) gatherText(kids[i]);
+                                }
+                            }
+                            gatherText(el);
+                            if (textNodes.length === 0) return null;
+
+                            var splitNode = null, splitOffset = 0;
+
+                            outer:
+                            for (var t = 0; t < textNodes.length; t++) {
+                                var tn = textNodes[t];
+                                var words = tn.nodeValue.split('');  /* char by char */
+                                /* Find spaces to use as split points */
+                                var len = tn.nodeValue.length;
+                                for (var c = 0; c < len; c++) {
+                                    range.setStart(tn, 0);
+                                    range.setEnd(tn, c + 1);
+                                    var rects = range.getClientRects();
+                                    if (rects.length === 0) continue;
+                                    var lastRect = rects[rects.length - 1];
+                                    if (lastRect.bottom > pageBot) {
+                                        /* Find previous space character to split cleanly */
+                                        var cutAt = c;
+                                        while (cutAt > 0 && tn.nodeValue[cutAt] !== ' ') cutAt--;
+                                        if (cutAt === 0) cutAt = c; /* no space found, cut here */
+                                        splitNode   = tn;
+                                        splitOffset = cutAt;
+                                        break outer;
+                                    }
+                                }
+                            }
+
+                            if (splitNode === null) return null; /* everything fits */
+
+                            /* Clone the element, split at the found position */
+                            var before = el.cloneNode(true);
+                            var after  = el.cloneNode(true);
+
+                            /* Rebuild text content: 'before' keeps up-to splitOffset,
+                               'after' keeps the rest.
+                               Simpler approach: use Range.extractContents / insertNode */
+                            range.setStart(splitNode, splitOffset);
+                            range.setEnd(el, el.childNodes.length > 0 ?
+                                el.childNodes.length : 0);
+
+                            /* Walk and truncate: delete from splitOffset onward in 'el' */
+                            /* We do this by rebuilding using innerHTML split */
+                            /* Simplest reliable approach for old WebKit: */
+                            range.setStart(splitNode, splitOffset);
+                            range.setEndAfter(el.lastChild || el);
+                            var extracted = range.extractContents();  /* mutates el */
+
+                            /* 'el' now contains content up to the cut point */
+                            /* Create sibling with the extracted remainder */
+                            var remainder = el.cloneNode(false);  /* clone tag + attrs, no children */
+                            remainder.appendChild(extracted);
+                            el.parentNode.insertBefore(remainder, el.nextSibling);
+                            return remainder;
+                        }
+
+                        /* Apply splitting: for each block taller than AVAIL_H,
+                           split repeatedly until all pieces fit */
+                        var finalBlocks = [];
+                        for (var i = 0; i < blocks.length; i++) {
+                            var bl = blocks[i];
+                            var r  = bl.getBoundingClientRect();
+                            if (r.height <= AVAIL_H) {
+                                finalBlocks.push(bl);
+                                continue;
+                            }
+                            /* Block is taller than one page — split it */
+                            var pageTop = r.top;
+                            var piece = bl;
+                            var safety = 0;
+                            while (piece && safety < 50) {
+                                safety++;
+                                var pr = piece.getBoundingClientRect();
+                                var pageBot = pageTop + AVAIL_H;
+                                if (pr.bottom <= pageBot) {
+                                    finalBlocks.push(piece);
+                                    break;
+                                }
+                                var remainder = splitBlock(piece, pageTop, pageBot);
+                                finalBlocks.push(piece);
+                                piece = remainder;
+                                if (piece) {
+                                    var nr = piece.getBoundingClientRect();
+                                    pageTop = nr.top;
+                                }
+                            }
+                            if (piece && safety >= 50) finalBlocks.push(piece);
+                        }
+
+                        /* ────────────────────────────────────────────────────────────
+                           STEP C: Assign finalBlocks to pages.
+                           Now every block fits within AVAIL_H, so we just use
+                           getBoundingClientRect().top to determine which page it
+                           belongs to. Accumulate heights to track page boundaries.
+                           ──────────────────────────────────────────────────────────── */
+                        var pageGroups = [];
+                        var curPage = 0;
+                        var usedH   = 0;     /* height used so far on curPage */
+
+                        for (var i = 0; i < finalBlocks.length; i++) {
+                            var fb = finalBlocks[i];
+                            var r  = fb.getBoundingClientRect();
+                            var h  = r.height;
+
+                            /* If this block doesn't fit on curPage, start next page */
+                            if (usedH > 0 && usedH + h > AVAIL_H) {
+                                curPage++;
+                                usedH = 0;
+                            }
+                            while (pageGroups.length <= curPage) pageGroups.push([]);
+                            pageGroups[curPage].push(fb);
+                            usedH += h;
+                        }
+
+                        /* ── PHASE 3: build page divs and install wrapper ── */
+                        var totalPages = pageGroups.length;
+                        if (totalPages === 0) totalPages = 1;
+                        if (totalPages %% 2 !== 0) totalPages++;
+
+                        var wrap = document.createElement('div');
+                        wrap.id = 'qp-wrap';
+                        wrap.style.cssText = [
+                            'position:fixed','top:0','left:0',
+                            'width:'+VW+'px','height:'+VH+'px',
+                            'overflow:hidden','background:inherit'
                         ].join(';');
 
-                        /* Left clip */
-                        var clipL = document.createElement('div');
-                        clipL.id  = 'qp-clip-l';
-                        clipL.style.cssText = [
-                            'position:absolute',
-                            'top:0','left:' + PAD_H + 'px',
-                            'width:'  + innerW + 'px',
-                            'height:' + VH + 'px',
-                            'overflow:hidden'
-                        ].join(';');
+                        for (var p = 0; p < totalPages; p++) {
+                            var isLeft  = (p %% 2 === 0);
+                            var pageDiv = document.createElement('div');
+                            pageDiv.className = 'qp-page';
+                            pageDiv.setAttribute('data-page', p);
+                            pageDiv.style.cssText = [
+                                'position:absolute',
+                                'top:'+PAD_V+'px',
+                                'left:'+(isLeft ? PAD_H : (PW+PAD_H))+'px',
+                                'width:'+innerW+'px',
+                                'height:'+AVAIL_H+'px',
+                                'overflow:hidden',
+                                'display:none',
+                                'padding:0','margin:0','box-sizing:border-box'
+                            ].join(';');
 
-                        /* Right clip */
-                        var clipR = document.createElement('div');
-                        clipR.id  = 'qp-clip-r';
-                        clipR.style.cssText = [
-                            'position:absolute',
-                            'top:0','left:' + (PW + PAD_H) + 'px',
-                            'width:'  + innerW + 'px',
-                            'height:' + VH + 'px',
-                            'overflow:hidden'
-                        ].join(';');
-
-                        var colR = col.cloneNode(true);
-                        colR.id  = 'qp-col-r';
-
-                        clipL.appendChild(col);
-                        clipR.appendChild(colR);
-                        outer.appendChild(clipL);
-                        outer.appendChild(clipR);
+                            var elems = pageGroups[p] || [];
+                            for (var e = 0; e < elems.length; e++) {
+                                var elem = elems[e];
+                                elem.style.removeProperty('position');
+                                elem.style.removeProperty('top');
+                                elem.style.removeProperty('left');
+                                pageDiv.appendChild(elem);
+                            }
+                            wrap.appendChild(pageDiv);
+                        }
 
                         body.style.cssText = [
                             'margin:0!important','padding:0!important',
-                            'position:relative!important',
-                            'width:'  + VW + 'px!important',
-                            'height:' + VH + 'px!important',
+                            'width:'+VW+'px!important','height:'+VH+'px!important',
                             'overflow:hidden!important'
                         ].join(';');
                         document.documentElement.style.cssText = [
                             'margin:0!important','padding:0!important',
-                            'width:'  + VW + 'px!important',
-                            'height:' + VH + 'px!important',
+                            'width:'+VW+'px!important','height:'+VH+'px!important',
                             'overflow:hidden!important'
                         ].join(';');
+                        while (body.firstChild) body.removeChild(body.firstChild);
+                        body.appendChild(wrap);
 
-                        body.appendChild(outer);
+                        /* ── PHASE 4: show target spread ── */
+                        var totalSpreads = Math.ceil(totalPages / 2);
+                        var landed = (TARGET === LAST)
+                            ? totalSpreads - 1
+                            : Math.min(TARGET, totalSpreads - 1);
 
-                        /* ── PHASE 5: scroll to target spread ──
-                           Page P offset: top = -(P * AVAIL_H)
-                           The PAD_V at the top of col means:
-                             page 0: top=0    → clip shows [0 .. VH], col starts at top of clip ✓
-                             page 1: top=-AVAIL_H → clip shows [AVAIL_H .. AVAIL_H+VH]
-                                     col top padding means content[0..PAD_V] is above clip ✓
-                           The PAD_V padding makes the top/bottom margins appear on every page. */
-                        var leftPage  = landed * 2;
-                        var rightPage = landed * 2 + 1;
-                        col.style.top  = -(leftPage  * AVAIL_H) + 'px';
-                        colR.style.top = -(rightPage * AVAIL_H) + 'px';
+                        function showSpread(s) {
+                            var lp = s * 2, rp = s * 2 + 1;
+                            var pages = wrap.querySelectorAll('.qp-page');
+                            for (var i = 0; i < pages.length; i++) {
+                                var idx = parseInt(pages[i].getAttribute('data-page'), 10);
+                                pages[i].style.display = (idx===lp||idx===rp) ? 'block':'none';
+                            }
+                        }
 
-                        window._qpTotal  = totalSpreads;
-                        window._qpCur    = landed;
-                        window._qpAvailH = AVAIL_H;
-                        window._qpCol    = col;
-                        window._qpColR   = colR;
+                        showSpread(landed);
+
+                        window._qpTotal      = totalSpreads;
+                        window._qpCur        = landed;
+                        window._qpShowSpread = showSpread;
 
                         window.status = 'qp:ready:' + totalSpreads + ':' + landed;
 
                     }, 600);
                 })();
                 """,
-                vw, vh, pageW, pageH, padH, padV, availH, targetSpread, LAST_SPREAD);
+                vw, vh, pageW, padH, padV, availH, targetSpread, LAST_SPREAD);
 
         try {
             engine.executeScript(js);
@@ -573,26 +663,16 @@ public class ReaderController {
         }
     }
 
-    // ── Fast page-turn (no reflow) ────────────────────────────────────────────
-    // Page P offset formula: col.top = -(P * AVAIL_H)
-    // Left page of spread S = page 2*S
-    // Right page of spread S = page 2*S + 1
-    // The PAD_V baked into qp-col top/bottom padding produces the visual
-    // margin automatically — no extra arithmetic needed here.
+    // ── Fast page-turn — show/hide page divs, no scrolling, no clipping math ─
     private static final String JS_NEXT = """
             (function() {
-                var col    = window._qpCol;
-                var colR   = window._qpColR;
-                if (!col || !colR) { window.status=''; window.status='qp:next-chapter'; return; }
-                var cur    = window._qpCur    !== undefined ? window._qpCur    : 0;
-                var total  = window._qpTotal  !== undefined ? window._qpTotal  : 1;
-                var availH = window._qpAvailH !== undefined ? window._qpAvailH : 700;
+                var showSpread = window._qpShowSpread;
+                var cur   = window._qpCur   !== undefined ? window._qpCur   : 0;
+                var total = window._qpTotal  !== undefined ? window._qpTotal : 1;
+                if (!showSpread) { window.status=''; window.status='qp:next-chapter'; return; }
                 if (cur + 1 < total) {
-                    var next      = cur + 1;
-                    var leftPage  = next * 2;
-                    var rightPage = next * 2 + 1;
-                    col.style.top  = -(leftPage  * availH) + 'px';
-                    colR.style.top = -(rightPage * availH) + 'px';
+                    var next = cur + 1;
+                    showSpread(next);
                     window._qpCur = next;
                     window.status = ''; window.status = 'qp:turned:' + next;
                 } else {
@@ -603,17 +683,12 @@ public class ReaderController {
 
     private static final String JS_PREV = """
             (function() {
-                var col    = window._qpCol;
-                var colR   = window._qpColR;
-                if (!col || !colR) { window.status=''; window.status='qp:prev-chapter'; return; }
-                var cur    = window._qpCur    !== undefined ? window._qpCur    : 0;
-                var availH = window._qpAvailH !== undefined ? window._qpAvailH : 700;
+                var showSpread = window._qpShowSpread;
+                var cur = window._qpCur !== undefined ? window._qpCur : 0;
+                if (!showSpread) { window.status=''; window.status='qp:prev-chapter'; return; }
                 if (cur > 0) {
-                    var prev      = cur - 1;
-                    var leftPage  = prev * 2;
-                    var rightPage = prev * 2 + 1;
-                    col.style.top  = -(leftPage  * availH) + 'px';
-                    colR.style.top = -(rightPage * availH) + 'px';
+                    var prev = cur - 1;
+                    showSpread(prev);
                     window._qpCur = prev;
                     window.status = ''; window.status = 'qp:turned:' + prev;
                 } else {
