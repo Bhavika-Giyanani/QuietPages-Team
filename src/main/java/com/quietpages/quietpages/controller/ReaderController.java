@@ -341,11 +341,14 @@ public class ReaderController {
             @Override
             public void run() {
                 Platform.runLater(() -> {
-                    busy.set(false); // clear any stale lock before repaginating
-                    runPagination(currentSpread);
+                    busy.set(false);
+                    // Reload from original HTML — the DOM is already restructured
+                    // from the previous pagination run so we cannot re-paginate
+                    // in place. A chapter reload gives clean HTML at the new size.
+                    loadChapter(spineIndex, currentSpread);
                 });
             }
-        }, 250);
+        }, 350);
     }
 
     // ── Core: element-grouping pagination ────────────────────────────────────
@@ -361,14 +364,18 @@ public class ReaderController {
             return;
         }
 
-        double pageW = vw / 2.0;
-        double padH = theme.marginH;
-        double padV = 44.0;
+        double pageW  = vw / 2.0;
+        double padH   = theme.marginH;
+        double padV   = 44.0;
         double availH = vh - padV * 2.0;
+        // packH: packing budget, slightly less than availH so last line
+        // always has bottom clearance and is never half-clipped.
+        double lineBuffer = theme.fontSize * theme.lineHeight + 4.0;
+        double packH  = availH - lineBuffer;
 
         String js = String.format("""
                 (function() {
-                    var VW=%f, VH=%f, PW=%f, PAD_H=%f, PAD_V=%f, AVAIL_H=%f;
+                    var VW=%f, VH=%f, PW=%f, PAD_H=%f, PAD_V=%f, AVAIL_H=%f, PACK_H=%f;
                     var TARGET=%d, LAST=%d;
                     var body = document.body;
                     if (!body) { window.status='qp:ready:1:0'; return; }
@@ -564,7 +571,7 @@ public class ReaderController {
                             var h  = r.height;
 
                             /* If this block doesn't fit on curPage, start next page */
-                            if (usedH > 0 && usedH + h > AVAIL_H) {
+                            if (usedH > 0 && usedH + h > PACK_H) {
                                 curPage++;
                                 usedH = 0;
                             }
@@ -652,7 +659,7 @@ public class ReaderController {
                     }, 600);
                 })();
                 """,
-                vw, vh, pageW, padH, padV, availH, targetSpread, LAST_SPREAD);
+                vw, vh, pageW, padH, padV, availH, packH, targetSpread, LAST_SPREAD);
 
         try {
             engine.executeScript(js);
@@ -906,17 +913,83 @@ public class ReaderController {
         readerStack.getChildren().add(popup);
         Platform.runLater(field::requestFocus);
 
+        // Custom search: highlights across ALL page divs (including hidden ones),
+        // then navigates to the spread containing the first match.
+        // window.find() is broken for our layout — it only sees visible DOM
+        // and scrolls the page div vertically instead of turning pages.
         Runnable search = () -> {
             String term = field.getText().trim();
-            if (term.isBlank())
-                return;
-            String safe = term.replace("\\", "\\\\").replace("'", "\\'");
+            if (term.isBlank()) return;
+            boolean mc = btnMC.isSelected();
+            boolean ww = btnWW.isSelected();
+            // Escape for JS string and regex
+            String esc = term.replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("/", "\\/")
+                    .replace(".", "\\.")
+                    .replace("*", "\\*")
+                    .replace("+", "\\+")
+                    .replace("?", "\\?")
+                    .replace("(", "\\(")
+                    .replace(")", "\\)")
+                    .replace("[", "\\[")
+                    .replace("]", "\\]")
+                    .replace("{", "\\{")
+                    .replace("}", "\\}")
+                    .replace("^", "\\^")
+                    .replace("$", "\\$")
+                    .replace("|", "\\|");
+            String wbPre  = ww ? "\\b" : "";
+            String wbPost = ww ? "\\b" : "";
+            String flags  = mc ? "g" : "gi";
+            String js = "(function(){" +
+                    "var re=new RegExp('" + wbPre + esc + wbPost + "','" + flags + "');" +
+                    "var marks=document.querySelectorAll('mark.qp-hl');" +
+                    "for(var i=0;i<marks.length;i++){" +
+                    "  marks[i].parentNode.replaceChild(document.createTextNode(marks[i].textContent),marks[i]);}" +
+                    "document.body.normalize();" +
+                    "var wrap=document.getElementById('qp-wrap');" +
+                    "if(!wrap)return 'nopages';" +
+                    "var tw=document.createTreeWalker(wrap,NodeFilter.SHOW_TEXT,null,false);" +
+                    "var txts=[];var nd;" +
+                    "while((nd=tw.nextNode())){if(re.test(nd.nodeValue))txts.push(nd);}" +
+                    "var count=0;" +
+                    "for(var i=0;i<txts.length;i++){" +
+                    "  var tn=txts[i];re.lastIndex=0;" +
+                    "  var val=tn.nodeValue;var parts=[];var last=0;var m;" +
+                    "  while((m=re.exec(val))!==null){" +
+                    "    if(m.index>last)parts.push(document.createTextNode(val.slice(last,m.index)));" +
+                    "    var mk=document.createElement('mark');" +
+                    "    mk.className='qp-hl';" +
+                    "    mk.style.cssText='background:#FFD700;color:#000;border-radius:2px;padding:0 1px;';" +
+                    "    mk.textContent=m[0];parts.push(mk);last=m.index+m[0].length;count++;}" +
+                    "  if(parts.length>0){" +
+                    "    if(last<val.length)parts.push(document.createTextNode(val.slice(last)));" +
+                    "    var f=document.createDocumentFragment();" +
+                    "    for(var j=0;j<parts.length;j++)f.appendChild(parts[j]);" +
+                    "    tn.parentNode.replaceChild(f,tn);}}" +
+                    "if(count===0)return 'notfound';" +
+                    "var first=document.querySelector('mark.qp-hl');" +
+                    "if(!first)return 'notfound';" +
+                    "var pg=first;" +
+                    "while(pg&&!pg.classList.contains('qp-page'))pg=pg.parentElement;" +
+                    "if(pg&&window._qpShowSpread){" +
+                    "  var idx=parseInt(pg.getAttribute('data-page'),10);" +
+                    "  var s=Math.floor(idx/2);" +
+                    "  window._qpShowSpread(s);window._qpCur=s;" +
+                    "  window.status='';window.status='qp:turned:'+s;}" +
+                    "return 'found:'+count;})()";
             try {
-                boolean found = Boolean.parseBoolean(String.valueOf(engine.executeScript(
-                        "window.find('" + safe + "'," + btnMC.isSelected() + ",false,true," + btnWW.isSelected()
-                                + ")")));
-                resultLbl.setText(found ? "✓ Match found" : "✗ No matches");
-                resultLbl.getStyleClass().setAll(found ? "reader-search-result-found" : "reader-search-result-none");
+                Object res = engine.executeScript(js);
+                String r = res != null ? res.toString() : "error";
+                if (r.startsWith("found:")) {
+                    int n = Integer.parseInt(r.split(":")[1]);
+                    resultLbl.setText("\u2713 " + n + " match" + (n == 1 ? "" : "es"));
+                    resultLbl.getStyleClass().setAll("reader-search-result-found");
+                } else {
+                    resultLbl.setText("\u2717 No matches");
+                    resultLbl.getStyleClass().setAll("reader-search-result-none");
+                }
             } catch (Exception ex) {
                 resultLbl.setText("Search error");
             }
@@ -927,9 +1000,13 @@ public class ReaderController {
 
     private void clearSearchHighlights() {
         try {
-            engine.executeScript("window.getSelection().removeAllRanges()");
-        } catch (Exception ignored) {
-        }
+            engine.executeScript(
+                    "(function(){" +
+                            "var m=document.querySelectorAll('mark.qp-hl');" +
+                            "for(var i=0;i<m.length;i++){" +
+                            "  m[i].parentNode.replaceChild(document.createTextNode(m[i].textContent),m[i]);}" +
+                            "document.body.normalize();})()");
+        } catch (Exception ignored) {}
     }
 
     // ── Text Style popup ──────────────────────────────────────────────────────
@@ -1035,9 +1112,9 @@ public class ReaderController {
         lblBreadcrumb.setText(crumb);
         double pct = totalChapters > 0
                 ? ((spineIndex + (totalSpreads > 1
-                        ? (double) currentSpread / totalSpreads
-                        : 0.0))
-                        / totalChapters) * 100.0
+                ? (double) currentSpread / totalSpreads
+                : 0.0))
+                / totalChapters) * 100.0
                 : 0.0;
         lblProgress.setText(String.format("%.1f%%", pct));
     }
