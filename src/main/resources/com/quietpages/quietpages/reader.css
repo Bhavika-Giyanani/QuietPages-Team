@@ -1,42 +1,43 @@
 /* ══════════════════════════════════════════════════════════════════════════════
-   QuietPages — Reader Tab Stylesheet  (reader.css)
-   Fully rewritten to fix:
-     - Side-by-side two-page spread without vertical scrollbars on WebViews
-     - No blink on page turn (opacity transition)
-     - Better typography and visibility
-     - TOC popup below button
+   QuietPages — Reader Stylesheet  (reader.css)
+   Fixes:
+     • Search popup: compact dropdown, not full-height sidebar
+     • TOC popup: proper dark card with clear text and readable rows
+     • Text-style popup: visible alignment buttons with accent highlight
+     • Theme popup: swatch grid with hover + selected states
+     • Toolbar separator helper class
    ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── 1. READER COLOR TOKENS ──────────────────────────────────────────────────*/
+/* ── 1. COLOR TOKENS ─────────────────────────────────────────────────────────*/
 .reader-root {
   -r-bg: #0d0d0d;
   -r-bg-toolbar: #111111;
   -r-bg-statusbar: #0a0a0a;
-  -r-bg-popup: #1a1a1a;
-  -r-bg-popup-item: #222222;
+  -r-bg-popup: #1e1e1e;
   -r-bg-popup-hover: #2a2a2a;
+  -r-bg-popup-header: #161616;
 
   -r-text: #e8e8e8;
   -r-text-toolbar: #888888;
-  -r-text-toolbar-hover: #eeeeee;
+  -r-text-toolbar-hv: #eeeeee;
   -r-text-status: #444444;
   -r-text-popup: #cccccc;
-  -r-text-popup-muted: #777777;
+  -r-text-muted: #666666;
 
   -r-border: #1e1e1e;
-  -r-border-popup: #2e2e2e;
-  -r-divider: rgba(255, 255, 255, 0.06);
+  -r-border-popup: #333333;
+  -r-sep: rgba(255, 255, 255, 0.07);
 
   -r-accent: #c0284a;
-  -r-accent-hover: #d42f54;
-  -r-accent-bg: rgba(192, 40, 74, 0.12);
+  -r-accent-hv: #d42f54;
+  -r-accent-bg: rgba(192, 40, 74, 0.13);
 
   -r-nav-icon: rgba(255, 255, 255, 0.1);
-  -r-nav-icon-hover: rgba(255, 255, 255, 0.6);
-  -r-nav-bg-hover: rgba(255, 255, 255, 0.04);
+  -r-nav-icon-hv: rgba(255, 255, 255, 0.65);
+  -r-nav-bg-hv: rgba(255, 255, 255, 0.04);
 }
 
-/* ── 2. ROOT CONTAINER ───────────────────────────────────────────────────────*/
+/* ── 2. ROOT ─────────────────────────────────────────────────────────────────*/
 .reader-root {
   -fx-background-color: -r-bg;
 }
@@ -46,17 +47,26 @@
   -fx-background-color: -r-bg-toolbar;
   -fx-border-color: transparent transparent -r-border transparent;
   -fx-border-width: 0 0 1 0;
-  -fx-min-height: 52px;
-  -fx-max-height: 52px;
+  -fx-min-height: 50px;
+  -fx-max-height: 50px;
   -fx-padding: 0 8 0 4;
-  -fx-spacing: 2;
+  -fx-spacing: 1;
+}
+
+/* Toolbar separator (used instead of inline style) */
+.reader-toolbar-sep {
+  -fx-background-color: rgba(255, 255, 255, 0.08);
+  -fx-pref-width: 1px;
+  -fx-min-width: 1px;
+  -fx-max-width: 1px;
+  -fx-padding: 8 6 8 6;
 }
 
 .reader-toolbar-btn {
   -fx-background-color: transparent;
-  -fx-pref-width: 40px;
-  -fx-pref-height: 40px;
-  -fx-min-width: 40px;
+  -fx-pref-width: 38px;
+  -fx-pref-height: 38px;
+  -fx-min-width: 38px;
   -fx-cursor: hand;
   -fx-padding: 0;
   -fx-background-radius: 5;
@@ -72,11 +82,11 @@
 }
 
 .reader-toolbar-btn:hover .ikonli-font-icon {
-  -fx-icon-color: -r-text-toolbar-hover;
+  -fx-icon-color: -r-text-toolbar-hv;
 }
 
 .reader-toolbar-btn:disabled {
-  -fx-opacity: 0.28;
+  -fx-opacity: 0.25;
 }
 
 .reader-toolbar-btn.active {
@@ -91,46 +101,26 @@
 }
 
 .reader-book-title {
-  -fx-text-fill: -r-text-toolbar;
+  -fx-text-fill: rgba(255, 255, 255, 0.45);
   -fx-font-size: 13px;
-  -fx-padding: 0 0 0 8;
-  -fx-opacity: 0.8;
+  -fx-padding: 0 0 0 6;
 }
 
-/* ── 4. MAIN READING AREA ────────────────────────────────────────────────────
-   Critical: readerStack and webViewContainer must fill the center pane
-   completely. WebViews inside get 50% width each via HBox ALWAYS grow.
-   The WebViews themselves should NOT show their own scroll bars — scrolling
-   within the chapter content is handled natively by WebKit; we inject CSS
-   into each chapter HTML that allows vertical scrolling in the content itself.
-   ─────────────────────────────────────────────────────────────────────────── */
-
+/* ── 4. READING AREA ─────────────────────────────────────────────────────────*/
 .reader-stack {
   -fx-background-color: -r-bg;
 }
 
-/* ── HBox holding left + divider + right WebView ── */
 .reader-pages {
   -fx-background-color: -r-bg;
-  -fx-spacing: 0;
-  /* Fill all available height */
-  -fx-pref-height: 10000; /* effectively "grow to fill" */
 }
 
-/* 1px center line between pages */
-.reader-page-divider {
-  -fx-background-color: -r-divider;
-  -fx-min-width: 1px;
-  -fx-max-width: 1px;
-  -fx-pref-width: 1px;
-}
-
-/* ── 5. NAVIGATION ARROW BUTTONS ─────────────────────────────────────────────*/
+/* ── 5. NAV ARROWS ───────────────────────────────────────────────────────────*/
 .reader-nav-btn {
   -fx-background-color: transparent;
-  -fx-pref-width: 52px;
-  -fx-min-width: 52px;
-  -fx-pref-height: 120px;
+  -fx-pref-width: 48px;
+  -fx-min-width: 48px;
+  -fx-pref-height: 110px;
   -fx-cursor: hand;
   -fx-background-radius: 0;
   -fx-padding: 0;
@@ -142,11 +132,11 @@
 }
 
 .reader-nav-btn:hover {
-  -fx-background-color: -r-nav-bg-hover;
+  -fx-background-color: -r-nav-bg-hv;
 }
 
 .reader-nav-btn:hover .ikonli-font-icon {
-  -fx-icon-color: -r-nav-icon-hover;
+  -fx-icon-color: -r-nav-icon-hv;
 }
 
 .reader-nav-left {
@@ -176,71 +166,82 @@
   -fx-font-size: 11px;
 }
 
-/* ── 7. FLOATING POPUP PANELS ────────────────────────────────────────────────*/
+/* ── 7. BASE POPUP CARD ──────────────────────────────────────────────────────
+   All three popups (search, text-style, theme) share this look.
+   They are compact dropdowns anchored to the top-right — NOT full-height panels. */
 .reader-popup {
   -fx-background-color: -r-bg-popup;
   -fx-border-color: -r-border-popup;
   -fx-border-width: 1;
   -fx-border-radius: 8;
   -fx-background-radius: 8;
-  -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.8), 24, 0, 0, 6);
+  -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.8), 20, 0, 0, 5);
+  /* Max height keeps popup compact — it never fills the full reader height */
+  -fx-max-height: 480px;
 }
 
 .reader-popup-label {
-  -fx-text-fill: -r-text-popup-muted;
-  -fx-font-size: 11px;
+  -fx-text-fill: rgba(255, 255, 255, 0.45);
+  -fx-font-size: 10px;
   -fx-font-weight: bold;
-  -fx-text-transform: uppercase;
+  /* uppercase via padding trick — JavaFX has no text-transform */
 }
 
-.reader-popup-muted {
-  -fx-text-fill: -r-text-popup-muted;
-  -fx-font-size: 11px;
-}
-
-/* ── 8. SEARCH POPUP ─────────────────────────────────────────────────────────*/
+/* ── 8. SEARCH POPUP ─────────────────────────────────────────────────────────
+   Compact card, 340px wide, appears just below toolbar right edge.
+   NOT a full-height vertical panel. */
 .reader-search-field {
   -fx-background-color: #141414;
   -fx-text-fill: -r-text-popup;
-  -fx-prompt-text-fill: -r-text-popup-muted;
+  -fx-prompt-text-fill: -r-text-muted;
   -fx-border-color: -r-accent;
   -fx-border-width: 0 0 2 0;
   -fx-background-radius: 4;
-  -fx-padding: 6 10;
+  -fx-padding: 7 10;
   -fx-font-size: 13px;
 }
 
+.reader-search-field:focused {
+  -fx-border-color: -r-accent-hv;
+}
+
 .reader-search-toggle {
-  -fx-background-color: #232323;
+  -fx-background-color: #252525;
   -fx-text-fill: -r-text-popup;
   -fx-border-color: #3a3a3a;
   -fx-border-radius: 4;
   -fx-background-radius: 4;
   -fx-font-size: 11px;
-  -fx-padding: 4 10;
+  -fx-font-weight: bold;
+  -fx-padding: 5 12;
   -fx-cursor: hand;
-  -fx-min-width: 36px;
-  -fx-pref-height: 28px;
+  -fx-pref-height: 30px;
 }
 
 .reader-search-toggle:selected {
   -fx-background-color: -r-accent-bg;
   -fx-border-color: -r-accent;
+  -fx-text-fill: -r-accent;
 }
 
 .reader-search-icon-btn {
-  -fx-background-color: transparent;
+  -fx-background-color: #252525;
   -fx-cursor: hand;
-  -fx-padding: 3 8;
+  -fx-padding: 6 10;
   -fx-background-radius: 4;
+  -fx-border-color: #3a3a3a;
+  -fx-border-radius: 4;
+  -fx-border-width: 1;
+  -fx-min-width: 30px;
+  -fx-min-height: 30px;
 }
 
 .reader-search-icon-btn:hover {
-  -fx-background-color: rgba(255, 255, 255, 0.07);
+  -fx-background-color: #333333;
 }
 
 .reader-search-icon-btn .ikonli-font-icon {
-  -fx-icon-color: -r-text-popup-muted;
+  -fx-icon-color: #999999;
 }
 
 .reader-search-icon-btn:hover .ikonli-font-icon {
@@ -248,19 +249,19 @@
 }
 
 .reader-search-result-found {
-  -fx-text-fill: #55bb77;
+  -fx-text-fill: #55cc77;
   -fx-font-size: 11px;
 }
 
 .reader-search-result-none {
-  -fx-text-fill: #ff5555;
+  -fx-text-fill: #cc5555;
   -fx-font-size: 11px;
 }
 
 /* ── 9. TEXT STYLE POPUP ─────────────────────────────────────────────────────*/
 .reader-style-slider {
-  -fx-pref-width: 280px;
-  -fx-max-width: 280px;
+  -fx-pref-width: 270px;
+  -fx-max-width: 270px;
   -fx-accent: -r-accent;
 }
 
@@ -269,36 +270,42 @@
   -fx-background-radius: 50%;
   -fx-pref-width: 14px;
   -fx-pref-height: 14px;
-  -fx-effect: dropshadow(gaussian, rgba(192, 40, 74, 0.4), 6, 0, 0, 0);
+  -fx-effect: dropshadow(gaussian, rgba(192, 40, 74, 0.45), 6, 0, 0, 0);
 }
 
 .reader-style-slider .track {
-  -fx-background-color: rgba(192, 40, 74, 0.3);
+  -fx-background-color: rgba(192, 40, 74, 0.25);
   -fx-pref-height: 3px;
   -fx-background-radius: 2;
 }
 
+/* Alignment buttons — explicit size + clear selected state */
 .reader-align-btn {
-  -fx-background-color: #232323;
+  -fx-background-color: #252525;
   -fx-border-color: #3a3a3a;
-  -fx-border-radius: 4;
-  -fx-background-radius: 4;
-  -fx-pref-width: 52px;
-  -fx-pref-height: 34px;
+  -fx-border-radius: 5;
+  -fx-background-radius: 5;
+  -fx-border-width: 1;
+  -fx-pref-width: 56px;
+  -fx-pref-height: 36px;
   -fx-cursor: hand;
 }
 
 .reader-align-btn:hover {
-  -fx-background-color: #2e2e2e;
+  -fx-background-color: #303030;
+  -fx-border-color: #555555;
 }
 
 .reader-align-btn:selected {
   -fx-background-color: -r-accent-bg;
   -fx-border-color: -r-accent;
+  -fx-border-width: 2;
 }
 
+/* Icon colours driven by controller listener, but CSS fallback: */
 .reader-align-btn .ikonli-font-icon {
-  -fx-icon-color: #777777;
+  -fx-icon-color: #888888;
+  -fx-icon-size: 14px;
 }
 
 .reader-align-btn:selected .ikonli-font-icon {
@@ -306,11 +313,11 @@
 }
 
 .reader-reset-btn {
-  -fx-background-color: #232323;
-  -fx-text-fill: #888888;
+  -fx-background-color: #252525;
+  -fx-text-fill: #999999;
   -fx-font-size: 12px;
   -fx-cursor: hand;
-  -fx-padding: 5 12;
+  -fx-padding: 6 14;
   -fx-background-radius: 4;
   -fx-border-color: #3a3a3a;
   -fx-border-radius: 4;
@@ -318,54 +325,78 @@
 }
 
 .reader-reset-btn:hover {
-  -fx-background-color: #2e2e2e;
+  -fx-background-color: #303030;
   -fx-text-fill: #cccccc;
+  -fx-border-color: #555555;
 }
 
-/* ── 10. SCROLLBAR inside popups ─────────────────────────────────────────────*/
-.reader-scroll-pane {
+/* ── 10. THEME POPUP ─────────────────────────────────────────────────────────
+   Swatch chips are styled inline in Java for dynamic colors.
+   CSS here only covers structural/shared parts. */
+/* (Swatch VBox uses inline styles generated per-theme in Java) */
+
+/* ── 11. TOC POPUP (Popup window, not StackPane overlay) ─────────────────────
+   The TOC uses a javafx.stage.Popup. Its content is a VBox styled inline
+   in Java, but the inner ScrollPane and rows need the library.css dark theme.
+   We override the scroll-bar here so it matches the reader dark background. */
+.toc-scroll-pane {
   -fx-background-color: transparent;
   -fx-border-color: transparent;
 }
 
-.reader-scroll-pane > .viewport {
+.toc-scroll-pane > .viewport {
   -fx-background-color: transparent;
 }
 
-.reader-scroll-pane .scroll-bar {
+.toc-scroll-pane .scroll-bar {
   -fx-background-color: transparent;
 }
 
-.reader-scroll-pane .scroll-bar .thumb {
+.toc-scroll-pane .scroll-bar .thumb {
   -fx-background-color: rgba(255, 255, 255, 0.12);
-  -fx-background-radius: 4;
+  -fx-background-radius: 3;
 }
 
-.reader-scroll-pane .scroll-bar .thumb:hover {
+.toc-scroll-pane .scroll-bar .thumb:hover {
   -fx-background-color: rgba(255, 255, 255, 0.22);
 }
 
-.reader-scroll-pane .scroll-bar .increment-button,
-.reader-scroll-pane .scroll-bar .decrement-button {
+.toc-scroll-pane .scroll-bar .increment-button,
+.toc-scroll-pane .scroll-bar .decrement-button {
   -fx-background-color: transparent;
   -fx-padding: 0;
 }
 
-.reader-scroll-pane .scroll-bar .increment-arrow,
-.reader-scroll-pane .scroll-bar .decrement-arrow {
+.toc-scroll-pane .scroll-bar .increment-arrow,
+.toc-scroll-pane .scroll-bar .decrement-arrow {
   -fx-background-color: transparent;
   -fx-shape: "";
   -fx-padding: 0;
 }
 
-/* ── 11. WebView scroll-bar hiding ───────────────────────────────────────────
-   JavaFX WebView renders its own scroll bars via WebKit.
-   We suppress them by injecting CSS into each chapter HTML (in EpubRenderer).
-   The rule below is a safety net for the outer JavaFX scroll bar if it appears.
-   ─────────────────────────────────────────────────────────────────────────── */
-WebView .scroll-bar:vertical,
-WebView .scroll-bar:horizontal {
-  visibility: hidden;
-  -fx-pref-width: 0;
-  -fx-pref-height: 0;
+/* ── 12. SCROLLBAR INSIDE POPUPS ─────────────────────────────────────────────*/
+.reader-popup .scroll-bar {
+  -fx-background-color: transparent;
+}
+
+.reader-popup .scroll-bar .thumb {
+  -fx-background-color: rgba(255, 255, 255, 0.1);
+  -fx-background-radius: 3;
+}
+
+.reader-popup .scroll-bar .thumb:hover {
+  -fx-background-color: rgba(255, 255, 255, 0.2);
+}
+
+.reader-popup .scroll-bar .increment-button,
+.reader-popup .scroll-bar .decrement-button {
+  -fx-background-color: transparent;
+  -fx-padding: 0;
+}
+
+.reader-popup .scroll-bar .increment-arrow,
+.reader-popup .scroll-bar .decrement-arrow {
+  -fx-background-color: transparent;
+  -fx-shape: "";
+  -fx-padding: 0;
 }

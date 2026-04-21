@@ -101,6 +101,8 @@ public class ReaderController {
     @FXML
     private Button btnTextStyle;
     @FXML
+    private Button btnTheme;
+    @FXML
     private Button btnFullscreen;
     @FXML
     private FontIcon iconFullscreen;
@@ -143,8 +145,15 @@ public class ReaderController {
 
     private StackPane transitionOverlay;
     private Popup tocPopup;
+    private Popup searchPopup;
+    private Popup stylePopup;
+    private Popup themePopup;
     private static final String ID_SEARCH = "qp-search-popup";
     private static final String ID_STYLE = "qp-style-popup";
+    private static final String ID_THEME = "qp-theme-popup";
+
+    // Reader colour theme names (match EpubRenderer.ReaderTheme bgColor choices)
+    private String readerColorTheme = "dark";
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
@@ -173,11 +182,39 @@ public class ReaderController {
             double saved = book.getReadingProgress();
             spineIndex = Math.max(0, Math.min(
                     (int) (saved * Math.max(1, totalChapters)), totalChapters - 1));
+            wireKeyboardNav();
             loadChapter(spineIndex, 0);
         }));
         task.setOnFailed(e -> Platform.runLater(
                 () -> showError("Could not open: " + task.getException().getMessage())));
         new Thread(task, "epub-loader").start();
+    }
+
+    /**
+     * Wire keyboard arrow keys using an event FILTER on the scene.
+     * A filter fires during the capture phase — before WebView (or any
+     * focused node) gets a chance to consume the event. Using setOnKeyPressed
+     * (a handler) fires too late: WebView swallows the event first.
+     */
+    private void wireKeyboardNav() {
+        javafx.scene.Scene scene = readerRoot.getScene();
+        if (scene != null) {
+            scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+                if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN) {
+                    doNext();
+                    e.consume();
+                } else if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP) {
+                    doPrev();
+                    e.consume();
+                }
+            });
+        } else {
+            // Scene not yet attached — wait for it
+            readerRoot.sceneProperty().addListener((obs, ov, nv) -> {
+                if (nv != null)
+                    wireKeyboardNav();
+            });
+        }
     }
 
     // ── Build WebView ─────────────────────────────────────────────────────────
@@ -269,12 +306,25 @@ public class ReaderController {
     // ── Nav setup ─────────────────────────────────────────────────────────────
     private void setupNav() {
         readerStack.setFocusTraversable(true);
-        readerStack.setOnMouseClicked(e -> readerStack.requestFocus());
-        readerStack.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN)
+        readerRoot.setFocusTraversable(true);
+        readerStack.setOnMouseClicked(e -> readerRoot.requestFocus());
+        readerRoot.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN) {
                 doNext();
-            if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP)
+                e.consume();
+            } else if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP) {
                 doPrev();
+                e.consume();
+            }
+        });
+        readerStack.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.RIGHT || e.getCode() == KeyCode.PAGE_DOWN) {
+                doNext();
+                e.consume();
+            } else if (e.getCode() == KeyCode.LEFT || e.getCode() == KeyCode.PAGE_UP) {
+                doPrev();
+                e.consume();
+            }
         });
         webView.addEventFilter(ScrollEvent.SCROLL, e -> {
             e.consume();
@@ -364,14 +414,14 @@ public class ReaderController {
             return;
         }
 
-        double pageW  = vw / 2.0;
-        double padH   = theme.marginH;
-        double padV   = 44.0;
+        double pageW = vw / 2.0;
+        double padH = theme.marginH;
+        double padV = 44.0;
         double availH = vh - padV * 2.0;
         // packH: packing budget, slightly less than availH so last line
         // always has bottom clearance and is never half-clipped.
         double lineBuffer = theme.fontSize * theme.lineHeight + 4.0;
-        double packH  = availH - lineBuffer;
+        double packH = availH - lineBuffer;
 
         String js = String.format("""
                 (function() {
@@ -764,9 +814,8 @@ public class ReaderController {
 
     @FXML
     private void onSearch() {
-        Node ex = readerStack.lookup("#" + ID_SEARCH);
-        if (ex != null) {
-            readerStack.getChildren().remove(ex);
+        if (searchPopup != null && searchPopup.isShowing()) {
+            searchPopup.hide();
             btnSearch.getStyleClass().remove("active");
             clearSearchHighlights();
         } else {
@@ -777,10 +826,21 @@ public class ReaderController {
     }
 
     @FXML
+    private void onTheme() {
+        if (themePopup != null && themePopup.isShowing()) {
+            themePopup.hide();
+            btnTheme.getStyleClass().remove("active");
+        } else {
+            closeAllPopups();
+            showThemePopup();
+            btnTheme.getStyleClass().add("active");
+        }
+    }
+
+    @FXML
     private void onTextStyle() {
-        Node ex = readerStack.lookup("#" + ID_STYLE);
-        if (ex != null) {
-            readerStack.getChildren().remove(ex);
+        if (stylePopup != null && stylePopup.isShowing()) {
+            stylePopup.hide();
             btnTextStyle.getStyleClass().remove("active");
         } else {
             closeAllPopups();
@@ -803,28 +863,64 @@ public class ReaderController {
     // ── TOC popup ─────────────────────────────────────────────────────────────
     private void showTocPopup(List<TocEntry> tocList) {
         VBox content = new VBox(0);
-        content.setStyle("-fx-background-color:#1C1C1C;-fx-border-color:#303030;" +
-                "-fx-border-width:1;-fx-border-radius:8;-fx-background-radius:8;" +
-                "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.85),24,0,0,8);");
-        content.setPrefWidth(300);
-        content.setMaxHeight(460);
+        content.setStyle(
+                "-fx-background-color:#1A1A1A;" +
+                        "-fx-border-color:#333333;" +
+                        "-fx-border-width:1;" +
+                        "-fx-border-radius:9;" +
+                        "-fx-background-radius:9;" +
+                        "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.90),28,0,0,6);");
+        content.setPrefWidth(320);
+        content.setMaxWidth(320);
+        content.setMaxHeight(500);
 
+        // Header row with title + close button
         Label header = new Label("Table of Contents");
-        header.setStyle("-fx-text-fill:#DDDDDD;-fx-font-size:13px;-fx-font-weight:bold;" +
-                "-fx-padding:12 16 11 16;-fx-border-color:transparent transparent #303030 transparent;" +
-                "-fx-border-width:0 0 1 0;-fx-background-color:#232323;-fx-background-radius:8 8 0 0;");
+        header.setStyle(
+                "-fx-text-fill:#DDDDDD;" +
+                        "-fx-font-size:13px;" +
+                        "-fx-font-weight:bold;" +
+                        "-fx-padding:13 16 12 16;");
         header.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(header, Priority.ALWAYS);
+
+        Button closeBtn = new Button("\u2715"); /* ✕ — no FontIcon needed */
+        closeBtn.setStyle(
+                "-fx-background-color:transparent;" +
+                        "-fx-text-fill:#666666;" +
+                        "-fx-font-size:14px;" +
+                        "-fx-cursor:hand;" +
+                        "-fx-padding:4 14 4 4;" +
+                        "-fx-border-width:0;");
+        closeBtn.setOnMouseEntered(e -> closeBtn.setStyle(closeBtn.getStyle()
+                .replace("-fx-text-fill:#666666;", "-fx-text-fill:#CCCCCC;")));
+        closeBtn.setOnMouseExited(e -> closeBtn.setStyle(closeBtn.getStyle()
+                .replace("-fx-text-fill:#CCCCCC;", "-fx-text-fill:#666666;")));
+        closeBtn.setOnAction(e -> {
+            if (tocPopup != null)
+                tocPopup.hide();
+        });
+
+        HBox headerRow = new HBox(header, closeBtn);
+        headerRow.setAlignment(Pos.CENTER_LEFT);
+        headerRow.setStyle(
+                "-fx-background-color:#141414;" +
+                        "-fx-border-color:transparent transparent #2E2E2E transparent;" +
+                        "-fx-border-width:0 0 1 0;" +
+                        "-fx-background-radius:9 9 0 0;");
 
         VBox list = new VBox(0);
+        list.setStyle("-fx-background-color:#1A1A1A;");
         populateTocList(list, tocList, 0);
 
         ScrollPane scroll = new ScrollPane(list);
         scroll.setFitToWidth(true);
+        scroll.getStyleClass().add("toc-scroll-pane");
         scroll.setStyle("-fx-background-color:transparent;-fx-border-color:transparent;");
         scroll.getStylesheets().add(
-                getClass().getResource("/com/quietpages/quietpages/library.css").toExternalForm());
+                getClass().getResource("/com/quietpages/quietpages/reader.css").toExternalForm());
         VBox.setVgrow(scroll, Priority.ALWAYS);
-        content.getChildren().addAll(header, scroll);
+        content.getChildren().addAll(headerRow, scroll);
 
         tocPopup = new Popup();
         tocPopup.getContent().add(content);
@@ -833,7 +929,7 @@ public class ReaderController {
 
         javafx.geometry.Bounds b = btnToc.localToScreen(btnToc.getBoundsInLocal());
         if (b != null)
-            tocPopup.show(stage(), b.getMinX(), b.getMaxY() + 4);
+            tocPopup.show(stage(), b.getMinX(), b.getMaxY() + 6);
         else
             tocPopup.show(stage());
     }
@@ -844,17 +940,18 @@ public class ReaderController {
             Label row = new Label(entry.title);
             row.setMaxWidth(Double.MAX_VALUE);
             row.setWrapText(false);
-            row.setStyle(String.format(
-                    "-fx-text-fill:%s;-fx-font-size:%s;-fx-padding:9 14 9 %.0fpx;" +
-                            "-fx-cursor:hand;-fx-background-color:transparent;",
-                    depth == 0 ? "#CCCCCC" : "#888888",
-                    depth == 0 ? "13px" : "12px", lp));
-            row.setOnMouseEntered(e -> row.setStyle(row.getStyle()
+            String baseStyle = String.format(
+                    "-fx-text-fill:%s;-fx-font-size:%s;-fx-padding:10 16 10 %.0fpx;" +
+                            "-fx-cursor:hand;-fx-background-color:transparent;" +
+                            "-fx-border-color:transparent transparent rgba(255,255,255,0.04) transparent;" +
+                            "-fx-border-width:0 0 1 0;",
+                    depth == 0 ? "#CCCCCC" : "#999999",
+                    depth == 0 ? "13px" : "12px", lp);
+            row.setStyle(baseStyle);
+            row.setOnMouseEntered(e -> row.setStyle(baseStyle
                     .replace("-fx-background-color:transparent;",
-                            "-fx-background-color:rgba(255,255,255,0.06);")));
-            row.setOnMouseExited(e -> row.setStyle(row.getStyle()
-                    .replace("-fx-background-color:rgba(255,255,255,0.06);",
-                            "-fx-background-color:transparent;")));
+                            "-fx-background-color:rgba(255,255,255,0.07);")));
+            row.setOnMouseExited(e -> row.setStyle(baseStyle));
             final TocEntry fe = entry;
             row.setOnMouseClicked(e -> {
                 if (tocPopup != null)
@@ -870,97 +967,99 @@ public class ReaderController {
         }
     }
 
-    // ── Search popup ──────────────────────────────────────────────────────────
+    // ── Search popup (floating Popup, compact card) ─────────────────────────
     private void showSearchPopup() {
-        VBox popup = new VBox(8);
-        popup.setId(ID_SEARCH);
-        popup.getStyleClass().add("reader-popup");
-        popup.setPadding(new Insets(12, 14, 12, 14));
-        popup.setPrefWidth(340);
-        popup.setMaxWidth(340);
+        VBox card = new VBox(10);
+        card.setStyle(
+                "-fx-background-color:#1E1E1E;" +
+                        "-fx-border-color:#383838;" +
+                        "-fx-border-width:1;" +
+                        "-fx-border-radius:8;" +
+                        "-fx-background-radius:8;" +
+                        "-fx-padding:14 14 12 14;" +
+                        "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.85),22,0,0,5);");
+        card.setPrefWidth(340);
+        card.setMaxWidth(340);
 
         TextField field = new TextField();
-        field.setPromptText("Find in chapter...");
-        field.getStyleClass().add("reader-search-field");
+        field.setPromptText("Find in chapter…");
+        field.setStyle(
+                "-fx-background-color:#141414;" +
+                        "-fx-text-fill:#E0E0E0;" +
+                        "-fx-prompt-text-fill:#555555;" +
+                        "-fx-border-color:#C0284A;" +
+                        "-fx-border-width:0 0 2 0;" +
+                        "-fx-background-radius:4;" +
+                        "-fx-padding:8 10;" +
+                        "-fx-font-size:13px;");
         field.setMaxWidth(Double.MAX_VALUE);
 
-        ToggleButton btnMC = new ToggleButton("Aa");
-        btnMC.getStyleClass().add("reader-search-toggle");
-        ToggleButton btnWW = new ToggleButton("Ab|");
-        btnWW.getStyleClass().add("reader-search-toggle");
-        FontIcon gi = new FontIcon("fas-arrow-right");
-        gi.setIconSize(12);
-        Button btnGo = new Button("", gi);
-        btnGo.getStyleClass().add("reader-search-icon-btn");
-        FontIcon ci = new FontIcon("fas-times");
-        ci.setIconSize(12);
-        Button btnClose = new Button("", ci);
-        btnClose.getStyleClass().add("reader-search-icon-btn");
+        // Aa = match-case toggle, Ab| = whole-word toggle — plain text buttons
+        ToggleButton btnMC = mkTextToggle("Aa", "Match case");
+        ToggleButton btnWW = mkTextToggle("Ab|", "Whole word");
+
+        // → next match, ✕ close — Unicode characters, no FontIcon dependency
+        Button btnGo = mkFlatBtn("→", "Find next");
+        Button btnClose = mkFlatBtn("✕", "Close");
         btnClose.setOnAction(e -> {
-            readerStack.getChildren().remove(popup);
+            if (searchPopup != null)
+                searchPopup.hide();
             btnSearch.getStyleClass().remove("active");
             clearSearchHighlights();
         });
-        Region sp = new Region();
-        HBox.setHgrow(sp, Priority.ALWAYS);
-        HBox row2 = new HBox(6, btnMC, btnWW, sp, btnGo, btnClose);
-        row2.setAlignment(Pos.CENTER_LEFT);
-        Label resultLbl = new Label();
-        resultLbl.setStyle("-fx-font-size:11px;");
-        popup.getChildren().addAll(field, row2, resultLbl);
-        StackPane.setAlignment(popup, Pos.TOP_RIGHT);
-        StackPane.setMargin(popup, new Insets(60, 8, 0, 0));
-        readerStack.getChildren().add(popup);
-        Platform.runLater(field::requestFocus);
 
-        // Custom search: highlights across ALL page divs (including hidden ones),
-        // then navigates to the spread containing the first match.
-        // window.find() is broken for our layout — it only sees visible DOM
-        // and scrolls the page div vertically instead of turning pages.
+        Region gap = new Region();
+        HBox.setHgrow(gap, Priority.ALWAYS);
+        HBox controls = new HBox(6, btnMC, btnWW, gap, btnGo, btnClose);
+        controls.setAlignment(Pos.CENTER_LEFT);
+
+        Label resultLbl = new Label();
+        resultLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#888888;");
+
+        card.getChildren().addAll(field, controls, resultLbl);
+
+        searchPopup = new Popup();
+        searchPopup.setAutoHide(true);
+        searchPopup.getContent().add(card);
+        searchPopup.setOnHidden(e -> {
+            btnSearch.getStyleClass().remove("active");
+            clearSearchHighlights();
+        });
+
         Runnable search = () -> {
             String term = field.getText().trim();
-            if (term.isBlank()) return;
+            if (term.isBlank())
+                return;
             boolean mc = btnMC.isSelected();
             boolean ww = btnWW.isSelected();
-            // Escape for JS string and regex
-            String esc = term.replace("\\", "\\\\")
-                    .replace("'", "\\'")
-                    .replace("/", "\\/")
-                    .replace(".", "\\.")
-                    .replace("*", "\\*")
-                    .replace("+", "\\+")
-                    .replace("?", "\\?")
-                    .replace("(", "\\(")
-                    .replace(")", "\\)")
-                    .replace("[", "\\[")
-                    .replace("]", "\\]")
-                    .replace("{", "\\{")
-                    .replace("}", "\\}")
-                    .replace("^", "\\^")
-                    .replace("$", "\\$")
-                    .replace("|", "\\|");
-            String wbPre  = ww ? "\\b" : "";
-            String wbPost = ww ? "\\b" : "";
-            String flags  = mc ? "g" : "gi";
+            String esc = term.replace("\\", "\\\\").replace("'", "\\'")
+                    .replace("/", "\\/").replace(".", "\\.")
+                    .replace("*", "\\*").replace("+", "\\+")
+                    .replace("?", "\\?").replace("(", "\\(")
+                    .replace(")", "\\)").replace("[", "\\[")
+                    .replace("]", "\\]").replace("{", "\\{")
+                    .replace("}", "\\}").replace("^", "\\^")
+                    .replace("$", "\\$").replace("|", "\\|");
+            String wbPre = ww ? "\\b" : "", wbPost = ww ? "\\b" : "";
+            String flags = mc ? "g" : "gi";
             String js = "(function(){" +
                     "var re=new RegExp('" + wbPre + esc + wbPost + "','" + flags + "');" +
                     "var marks=document.querySelectorAll('mark.qp-hl');" +
-                    "for(var i=0;i<marks.length;i++){" +
-                    "  marks[i].parentNode.replaceChild(document.createTextNode(marks[i].textContent),marks[i]);}" +
+                    "for(var i=0;i<marks.length;i++){marks[i].parentNode.replaceChild(document.createTextNode(marks[i].textContent),marks[i]);}"
+                    +
                     "document.body.normalize();" +
                     "var wrap=document.getElementById('qp-wrap');" +
                     "if(!wrap)return 'nopages';" +
                     "var tw=document.createTreeWalker(wrap,NodeFilter.SHOW_TEXT,null,false);" +
-                    "var txts=[];var nd;" +
+                    "var txts=[],nd;" +
                     "while((nd=tw.nextNode())){if(re.test(nd.nodeValue))txts.push(nd);}" +
                     "var count=0;" +
                     "for(var i=0;i<txts.length;i++){" +
                     "  var tn=txts[i];re.lastIndex=0;" +
-                    "  var val=tn.nodeValue;var parts=[];var last=0;var m;" +
+                    "  var val=tn.nodeValue,parts=[],last=0,m;" +
                     "  while((m=re.exec(val))!==null){" +
                     "    if(m.index>last)parts.push(document.createTextNode(val.slice(last,m.index)));" +
-                    "    var mk=document.createElement('mark');" +
-                    "    mk.className='qp-hl';" +
+                    "    var mk=document.createElement('mark');mk.className='qp-hl';" +
                     "    mk.style.cssText='background:#FFD700;color:#000;border-radius:2px;padding:0 1px;';" +
                     "    mk.textContent=m[0];parts.push(mk);last=m.index+m[0].length;count++;}" +
                     "  if(parts.length>0){" +
@@ -984,11 +1083,11 @@ public class ReaderController {
                 String r = res != null ? res.toString() : "error";
                 if (r.startsWith("found:")) {
                     int n = Integer.parseInt(r.split(":")[1]);
-                    resultLbl.setText("\u2713 " + n + " match" + (n == 1 ? "" : "es"));
-                    resultLbl.getStyleClass().setAll("reader-search-result-found");
+                    resultLbl.setText("\u2713 " + n + " match" + (n == 1 ? "" : "es") + " highlighted");
+                    resultLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#55cc77;");
                 } else {
-                    resultLbl.setText("\u2717 No matches");
-                    resultLbl.getStyleClass().setAll("reader-search-result-none");
+                    resultLbl.setText("\u2717 No matches found");
+                    resultLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#cc5555;");
                 }
             } catch (Exception ex) {
                 resultLbl.setText("Search error");
@@ -996,45 +1095,72 @@ public class ReaderController {
         };
         btnGo.setOnAction(e -> search.run());
         field.setOnAction(e -> search.run());
+
+        javafx.geometry.Bounds b = btnSearch.localToScreen(btnSearch.getBoundsInLocal());
+        if (b != null)
+            searchPopup.show(stage(), b.getMaxX() - 340, b.getMaxY() + 6);
+        else
+            searchPopup.show(stage());
+        Platform.runLater(field::requestFocus);
     }
 
     private void clearSearchHighlights() {
         try {
             engine.executeScript(
-                    "(function(){" +
-                            "var m=document.querySelectorAll('mark.qp-hl');" +
-                            "for(var i=0;i<m.length;i++){" +
-                            "  m[i].parentNode.replaceChild(document.createTextNode(m[i].textContent),m[i]);}" +
+                    "(function(){var m=document.querySelectorAll('mark.qp-hl');" +
+                            "for(var i=0;i<m.length;i++){m[i].parentNode.replaceChild(document.createTextNode(m[i].textContent),m[i]);}"
+                            +
                             "document.body.normalize();})()");
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
-    // ── Text Style popup ──────────────────────────────────────────────────────
+    // ── Text Style popup (floating Popup) ───────────────────────────────────
     private void showTextStylePopup() {
-        VBox popup = new VBox(10);
-        popup.setId(ID_STYLE);
-        popup.getStyleClass().add("reader-popup");
-        popup.setPadding(new Insets(16));
-        popup.setPrefWidth(300);
-        popup.setMaxWidth(300);
+        VBox card = new VBox(12);
+        card.setStyle(
+                "-fx-background-color:#1E1E1E;" +
+                        "-fx-border-color:#383838;" +
+                        "-fx-border-width:1;" +
+                        "-fx-border-radius:8;" +
+                        "-fx-background-radius:8;" +
+                        "-fx-padding:16;" +
+                        "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.85),22,0,0,5);");
+        card.setPrefWidth(300);
+        card.setMaxWidth(300);
 
         Slider sl = mkSlider(1.2, 3.0, theme.lineHeight);
         Slider sf = mkSlider(12, 28, theme.fontSize);
         Slider sp = mkSlider(0, 3.0, theme.paragraphSpace);
         Slider sm = mkSlider(16, 80, theme.marginH);
 
+        // Alignment buttons using plain Unicode — no FontIcon dependency
         ToggleGroup ag = new ToggleGroup();
-        ToggleButton taL = mkAlignBtn("fas-align-left", "left", ag);
-        ToggleButton taC = mkAlignBtn("fas-align-center", "center", ag);
-        ToggleButton taJ = mkAlignBtn("fas-align-justify", "justify", ag);
-        ToggleButton taR = mkAlignBtn("fas-align-right", "right", ag);
+        ToggleButton taL = mkAlignBtn("\u2630", "left", ag, "Left");
+        ToggleButton taC = mkAlignBtn("\u2261", "center", ag, "Center");
+        ToggleButton taJ = mkAlignBtn("\u2630", "justify", ag, "Justify");
+        ToggleButton taR = mkAlignBtn("\u2630", "right", ag, "Right");
+
+        // Better visual: use actual alignment symbols
+        taL.setText("\u2630"); // Menu = left-ish
+        taC.setText("\u2261"); // Three lines centered
+        taJ.setText("\u2630");
+        taR.setText("\u2630");
+
+        // Use clear label text instead — most reliable cross-platform
+        taL.setText("L");
+        taC.setText("C");
+        taJ.setText("J");
+        taR.setText("R");
+
         ag.getToggles().stream().filter(t -> theme.textAlign.equals(t.getUserData()))
                 .findFirst().ifPresent(ag::selectToggle);
         HBox ar = new HBox(6, taL, taC, taJ, taR);
         ar.setAlignment(Pos.CENTER_LEFT);
 
-        Button btnReset = new Button("↺  Reset");
-        btnReset.getStyleClass().add("reader-reset-btn");
+        Button btnReset = mkFlatBtn("↺  Reset", "Reset to defaults");
+        btnReset.setStyle(btnReset.getStyle() +
+                "-fx-min-width:80px;-fx-padding:6 14;-fx-font-size:12px;");
         btnReset.setOnAction(e -> {
             ReaderTheme d = new ReaderTheme();
             theme.lineHeight = d.lineHeight;
@@ -1050,12 +1176,10 @@ public class ReaderController {
                     .findFirst().ifPresent(ag::selectToggle);
             reloadCurrentChapter();
         });
-        FontIcon ci2 = new FontIcon("fas-times");
-        ci2.setIconSize(11);
-        Button btnClose = new Button("", ci2);
-        btnClose.getStyleClass().add("reader-search-icon-btn");
+        Button btnClose = mkFlatBtn("✕", "Close");
         btnClose.setOnAction(e -> {
-            readerStack.getChildren().remove(popup);
+            if (stylePopup != null)
+                stylePopup.hide();
             btnTextStyle.getStyleClass().remove("active");
         });
         Region rx = new Region();
@@ -1063,13 +1187,17 @@ public class ReaderController {
         HBox br = new HBox(8, btnReset, rx, btnClose);
         br.setAlignment(Pos.CENTER_LEFT);
 
-        popup.getChildren().addAll(
-                mkLbl("Line spacing"), sl, mkLbl("Font size"), sf,
-                mkLbl("Para spacing"), sp, mkLbl("Page margin"), sm,
-                mkLbl("Alignment"), ar, br);
-        StackPane.setAlignment(popup, Pos.TOP_RIGHT);
-        StackPane.setMargin(popup, new Insets(60, 8, 0, 0));
-        readerStack.getChildren().add(popup);
+        card.getChildren().addAll(
+                mkPopupLbl("Line spacing"), sl,
+                mkPopupLbl("Font size"), sf,
+                mkPopupLbl("Para spacing"), sp,
+                mkPopupLbl("Page margin"), sm,
+                mkPopupLbl("Alignment"), ar, br);
+
+        stylePopup = new Popup();
+        stylePopup.setAutoHide(true);
+        stylePopup.getContent().add(card);
+        stylePopup.setOnHidden(e -> btnTextStyle.getStyleClass().remove("active"));
 
         sl.valueProperty().addListener((o, ov, nv) -> {
             theme.lineHeight = nv.doubleValue();
@@ -1093,6 +1221,12 @@ public class ReaderController {
                 reloadCurrentChapter();
             }
         });
+
+        javafx.geometry.Bounds b = btnTextStyle.localToScreen(btnTextStyle.getBoundsInLocal());
+        if (b != null)
+            stylePopup.show(stage(), b.getMaxX() - 300, b.getMaxY() + 6);
+        else
+            stylePopup.show(stage());
     }
 
     private void reloadCurrentChapter() {
@@ -1112,9 +1246,9 @@ public class ReaderController {
         lblBreadcrumb.setText(crumb);
         double pct = totalChapters > 0
                 ? ((spineIndex + (totalSpreads > 1
-                ? (double) currentSpread / totalSpreads
-                : 0.0))
-                / totalChapters) * 100.0
+                        ? (double) currentSpread / totalSpreads
+                        : 0.0))
+                        / totalChapters) * 100.0
                 : 0.0;
         lblProgress.setText(String.format("%.1f%%", pct));
     }
@@ -1151,13 +1285,23 @@ public class ReaderController {
 
     // ── Utility ───────────────────────────────────────────────────────────────
     private void closeAllPopups() {
-        for (String id : new String[] { ID_SEARCH, ID_STYLE }) {
-            Node n = readerStack.lookup("#" + id);
-            if (n != null)
-                readerStack.getChildren().remove(n);
+        if (searchPopup != null && searchPopup.isShowing()) {
+            searchPopup.hide();
+        }
+        if (stylePopup != null && stylePopup.isShowing()) {
+            stylePopup.hide();
+        }
+        if (themePopup != null && themePopup.isShowing()) {
+            themePopup.hide();
+        }
+        if (tocPopup != null && tocPopup.isShowing()) {
+            tocPopup.hide();
         }
         btnSearch.getStyleClass().remove("active");
         btnTextStyle.getStyleClass().remove("active");
+        if (btnTheme != null)
+            btnTheme.getStyleClass().remove("active");
+        btnToc.getStyleClass().remove("active");
     }
 
     private Slider mkSlider(double min, double max, double val) {
@@ -1170,22 +1314,92 @@ public class ReaderController {
     }
 
     private Label mkLbl(String t) {
-        Label l = new Label(t);
-        l.getStyleClass().add("reader-popup-label");
-        return l;
+        return mkPopupLbl(t);
     }
 
-    private ToggleButton mkAlignBtn(String icon, String align, ToggleGroup grp) {
-        FontIcon fi = new FontIcon(icon);
-        fi.setIconSize(13);
-        fi.setStyle("-fx-icon-color:#777777;");
-        ToggleButton btn = new ToggleButton("", fi);
+    // ── Popup helper factories ────────────────────────────────────────────────
+
+    /**
+     * Alignment toggle button — text label, fully visible, no FontIcon dependency.
+     */
+    private ToggleButton mkAlignBtn(String unusedIcon, String align, ToggleGroup grp, String label) {
+        ToggleButton btn = new ToggleButton(label);
         btn.setToggleGroup(grp);
         btn.setUserData(align);
-        btn.getStyleClass().add("reader-align-btn");
-        btn.selectedProperty()
-                .addListener((o, ov, nv) -> fi.setStyle("-fx-icon-color:" + (nv ? "#C0284A" : "#777777") + ";"));
+        btn.setStyle(
+                "-fx-background-color:#252525;" +
+                        "-fx-text-fill:#AAAAAA;" +
+                        "-fx-font-size:12px;-fx-font-weight:bold;" +
+                        "-fx-border-color:#444444;-fx-border-width:1;" +
+                        "-fx-border-radius:5;-fx-background-radius:5;" +
+                        "-fx-pref-width:54px;-fx-pref-height:34px;" +
+                        "-fx-cursor:hand;");
+        btn.selectedProperty().addListener((o, ov, nv) -> btn.setStyle(
+                "-fx-background-color:" + (nv ? "rgba(192,40,74,0.18)" : "#252525") + ";" +
+                        "-fx-text-fill:" + (nv ? "#C0284A" : "#AAAAAA") + ";" +
+                        "-fx-font-size:12px;-fx-font-weight:bold;" +
+                        "-fx-border-color:" + (nv ? "#C0284A" : "#444444") + ";-fx-border-width:" + (nv ? "2" : "1")
+                        + ";" +
+                        "-fx-border-radius:5;-fx-background-radius:5;" +
+                        "-fx-pref-width:54px;-fx-pref-height:34px;" +
+                        "-fx-cursor:hand;"));
         return btn;
+    }
+
+    /** Plain text toggle for search options (Aa, Ab|). */
+    private ToggleButton mkTextToggle(String label, String tooltip) {
+        ToggleButton btn = new ToggleButton(label);
+        btn.setStyle(
+                "-fx-background-color:#252525;" +
+                        "-fx-text-fill:#AAAAAA;" +
+                        "-fx-font-size:12px;-fx-font-weight:bold;" +
+                        "-fx-border-color:#444444;-fx-border-width:1;" +
+                        "-fx-border-radius:4;-fx-background-radius:4;" +
+                        "-fx-pref-height:30px;-fx-padding:0 12;" +
+                        "-fx-cursor:hand;");
+        btn.setTooltip(new Tooltip(tooltip));
+        btn.selectedProperty().addListener((o, ov, nv) -> btn.setStyle(
+                "-fx-background-color:" + (nv ? "rgba(192,40,74,0.18)" : "#252525") + ";" +
+                        "-fx-text-fill:" + (nv ? "#C0284A" : "#AAAAAA") + ";" +
+                        "-fx-font-size:12px;-fx-font-weight:bold;" +
+                        "-fx-border-color:" + (nv ? "#C0284A" : "#444444") + ";-fx-border-width:" + (nv ? "2" : "1")
+                        + ";" +
+                        "-fx-border-radius:4;-fx-background-radius:4;" +
+                        "-fx-pref-height:30px;-fx-padding:0 12;" +
+                        "-fx-cursor:hand;"));
+        return btn;
+    }
+
+    /** Small icon-style flat button using a Unicode character. */
+    private Button mkFlatBtn(String symbol, String tooltipText) {
+        Button btn = new Button(symbol);
+        btn.setStyle(
+                "-fx-background-color:#252525;" +
+                        "-fx-text-fill:#AAAAAA;" +
+                        "-fx-font-size:13px;" +
+                        "-fx-border-color:#444444;-fx-border-width:1;" +
+                        "-fx-border-radius:4;-fx-background-radius:4;" +
+                        "-fx-min-width:30px;-fx-min-height:30px;" +
+                        "-fx-padding:0 8;" +
+                        "-fx-cursor:hand;");
+        btn.setTooltip(new Tooltip(tooltipText));
+        btn.setOnMouseEntered(e -> btn.setStyle(btn.getStyle()
+                .replace("-fx-background-color:#252525;", "-fx-background-color:#333333;")
+                .replace("-fx-text-fill:#AAAAAA;", "-fx-text-fill:#EEEEEE;")));
+        btn.setOnMouseExited(e -> btn.setStyle(btn.getStyle()
+                .replace("-fx-background-color:#333333;", "-fx-background-color:#252525;")
+                .replace("-fx-text-fill:#EEEEEE;", "-fx-text-fill:#AAAAAA;")));
+        return btn;
+    }
+
+    /** Section label for style popup rows. */
+    private Label mkPopupLbl(String text) {
+        Label l = new Label(text.toUpperCase());
+        l.setStyle(
+                "-fx-text-fill:rgba(255,255,255,0.40);" +
+                        "-fx-font-size:9px;-fx-font-weight:bold;" +
+                        "-fx-padding:4 0 0 0;");
+        return l;
     }
 
     private void setWindowTitle(String t) {
@@ -1215,4 +1429,126 @@ public class ReaderController {
         if (renderer != null)
             reloadCurrentChapter();
     }
+
+    // ── Theme popup (floating Popup) ───────────────────────────────────────
+    private void showThemePopup() {
+        VBox card = new VBox(12);
+        card.setStyle(
+                "-fx-background-color:#1E1E1E;" +
+                        "-fx-border-color:#383838;" +
+                        "-fx-border-width:1;" +
+                        "-fx-border-radius:8;" +
+                        "-fx-background-radius:8;" +
+                        "-fx-padding:14;" +
+                        "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.85),22,0,0,5);");
+        card.setPrefWidth(270);
+        card.setMaxWidth(270);
+
+        // Header: title on the left, close button pinned to the right
+        Label titleLbl = new Label("Reader Theme");
+        titleLbl.setStyle("-fx-text-fill:#CCCCCC;-fx-font-size:12px;-fx-font-weight:bold;");
+        HBox.setHgrow(titleLbl, Priority.ALWAYS);
+
+        Button closeBtn = new Button("\u2715");
+        closeBtn.setStyle(
+                "-fx-background-color:transparent;" +
+                        "-fx-text-fill:#666666;" +
+                        "-fx-font-size:13px;" +
+                        "-fx-cursor:hand;" +
+                        "-fx-padding:2 6 2 6;" +
+                        "-fx-background-radius:4;" +
+                        "-fx-border-width:0;" +
+                        "-fx-min-width:24px;-fx-min-height:24px;");
+        closeBtn.setOnMouseEntered(ev -> closeBtn.setStyle(closeBtn.getStyle()
+                .replace("-fx-text-fill:#666666;", "-fx-text-fill:#EEEEEE;")
+                .replace("-fx-background-color:transparent;", "-fx-background-color:rgba(255,255,255,0.08);")));
+        closeBtn.setOnMouseExited(ev -> closeBtn.setStyle(closeBtn.getStyle()
+                .replace("-fx-text-fill:#EEEEEE;", "-fx-text-fill:#666666;")
+                .replace("-fx-background-color:rgba(255,255,255,0.08);", "-fx-background-color:transparent;")));
+        closeBtn.setOnAction(e -> {
+            if (themePopup != null)
+                themePopup.hide();
+            btnTheme.getStyleClass().remove("active");
+        });
+
+        HBox titleRow = new HBox(titleLbl, closeBtn);
+        titleRow.setAlignment(Pos.CENTER_LEFT);
+        titleRow.setPadding(new Insets(0, 0, 8, 0));
+
+        String[][] themes = {
+                { "dark", "#0D0D0D", "#E8E8E8", "Dark" },
+                { "light", "#F5F0E8", "#1A1A1A", "Light" },
+                { "sepia", "#F4ECD8", "#3B2F2F", "Sepia" },
+                { "night", "#0A0A1A", "#9BA8C0", "Night" },
+                { "forest", "#0F1A0F", "#C8E0C8", "Forest" },
+                { "ocean", "#0A1520", "#C0D8EE", "Ocean" },
+        };
+
+        javafx.scene.layout.FlowPane swatchRow = new javafx.scene.layout.FlowPane(8, 10);
+        swatchRow.setPrefWrapLength(250);
+
+        for (String[] th : themes) {
+            String thName = th[0], thBg = th[1], thText = th[2], thLabel = th[3];
+            boolean isActive = readerColorTheme.equals(thName);
+
+            VBox swatch = new VBox(4);
+            swatch.setAlignment(Pos.CENTER);
+            swatch.setCursor(javafx.scene.Cursor.HAND);
+            swatch.setPrefWidth(62);
+
+            javafx.scene.layout.StackPane chip = new javafx.scene.layout.StackPane();
+            chip.setPrefSize(62, 40);
+            String border = isActive ? "#C0284A" : "#444444";
+            String chipStyle = "-fx-background-color:" + thBg + ";" +
+                    "-fx-border-color:" + border + ";" +
+                    "-fx-border-width:" + (isActive ? "2.5" : "1.5") + ";" +
+                    "-fx-border-radius:6;-fx-background-radius:6;";
+            chip.setStyle(chipStyle);
+
+            Label sample = new Label("Aa");
+            sample.setStyle(
+                    "-fx-text-fill:" + thText + ";" +
+                            "-fx-font-size:14px;" +
+                            "-fx-font-weight:bold;");
+            chip.getChildren().add(sample);
+
+            Label lbl = new Label(thLabel);
+            lbl.setStyle(
+                    "-fx-text-fill:" + (isActive ? "#C0284A" : "#888888") + ";" +
+                            "-fx-font-size:10px;" +
+                            (isActive ? "-fx-font-weight:bold;" : ""));
+
+            swatch.getChildren().addAll(chip, lbl);
+
+            swatch.setOnMouseEntered(
+                    e -> chip.setStyle(chipStyle.replace("border-color:" + border, "border-color:#C0284A")
+                            .replace("border-width:" + (isActive ? "2.5" : "1.5"), "border-width:2.5")));
+            swatch.setOnMouseExited(e -> chip.setStyle(chipStyle));
+
+            swatch.setOnMouseClicked(e -> {
+                readerColorTheme = thName;
+                theme.bgColor = thBg;
+                theme.textColor = thText;
+                if (themePopup != null)
+                    themePopup.hide();
+                btnTheme.getStyleClass().remove("active");
+                reloadCurrentChapter();
+            });
+            swatchRow.getChildren().add(swatch);
+        }
+
+        card.getChildren().addAll(titleRow, swatchRow);
+
+        themePopup = new Popup();
+        themePopup.setAutoHide(true);
+        themePopup.getContent().add(card);
+        themePopup.setOnHidden(e -> btnTheme.getStyleClass().remove("active"));
+
+        javafx.geometry.Bounds b = btnTheme.localToScreen(btnTheme.getBoundsInLocal());
+        if (b != null)
+            themePopup.show(stage(), b.getMaxX() - 270, b.getMaxY() + 6);
+        else
+            themePopup.show(stage());
+    }
+
 }

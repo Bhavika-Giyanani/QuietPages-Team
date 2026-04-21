@@ -10,8 +10,8 @@
 
     <!-- ══════════════════════════════════════════════════════════════════════
          TOP TOOLBAR
-         LEFT  : ← Back  |  ☰ TOC  |  Book Title
-         RIGHT : 🔍 Search  |  Tт Style  |  ⛶ Fullscreen
+         LEFT  : ← Back | ☰ TOC | Book Title
+         RIGHT : 🔍 Search | Tт Style | 🎨 Theme | ⛶ Fullscreen
          ══════════════════════════════════════════════════════════════════════ -->
     <top>
         <HBox fx:id="toolbarBox" styleClass="reader-toolbar" alignment="CENTER_LEFT">
@@ -26,7 +26,7 @@
                 </tooltip>
             </Button>
 
-            <!-- TOC — LEFT side, right after Back -->
+            <!-- TOC -->
             <Button fx:id="btnToc" styleClass="reader-toolbar-btn" onAction="#onToc">
                 <graphic>
                     <FontIcon iconLiteral="fas-list-ul" iconSize="15"/>
@@ -36,9 +36,9 @@
                 </tooltip>
             </Button>
 
-            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 6 10 6;"/>
+            <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
-            <!-- Book title — expands to fill space -->
+            <!-- Book title -->
             <Label fx:id="lblBookTitle" styleClass="reader-book-title" text="" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
 
             <!-- ── RIGHT SIDE ── -->
@@ -63,7 +63,7 @@
                 </tooltip>
             </Button>
 
-            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
+            <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
             <!-- Search -->
             <Button fx:id="btnSearch" styleClass="reader-toolbar-btn" onAction="#onSearch">
@@ -85,7 +85,7 @@
                 </tooltip>
             </Button>
 
-            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
+            <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
             <!-- Text Style -->
             <Button fx:id="btnTextStyle" styleClass="reader-toolbar-btn" onAction="#onTextStyle">
@@ -97,17 +97,17 @@
                 </tooltip>
             </Button>
 
-            <!-- Font (future) -->
-            <Button fx:id="btnFont" styleClass="reader-toolbar-btn" disable="true">
+            <!-- Reader Theme -->
+            <Button fx:id="btnTheme" styleClass="reader-toolbar-btn" onAction="#onTheme">
                 <graphic>
-                    <FontIcon iconLiteral="fas-font" iconSize="15"/>
+                    <FontIcon iconLiteral="fas-palette" iconSize="15"/>
                 </graphic>
                 <tooltip>
-                    <Tooltip text="Font (coming soon)"/>
+                    <Tooltip text="Reader Theme"/>
                 </tooltip>
             </Button>
 
-            <Separator orientation="VERTICAL" style="-fx-background-color:#222222;-fx-pref-width:1;-fx-padding:10 4 10 4;"/>
+            <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
             <!-- Fullscreen -->
             <Button fx:id="btnFullscreen" styleClass="reader-toolbar-btn" onAction="#onFullscreen">
@@ -124,24 +124,21 @@
 
     <!-- ══════════════════════════════════════════════════════════════════════
          MAIN READING AREA
-         Single WebView added in code to webViewContainer.
-         CSS column-count:2 applied via JS → left column = left page,
-         right column = right page. One spread = viewportWidth of content.
          ══════════════════════════════════════════════════════════════════════ -->
     <center>
         <StackPane fx:id="readerStack" styleClass="reader-stack">
 
-            <!-- WebView injected programmatically in buildWebView() -->
+            <!-- WebView injected programmatically -->
             <HBox fx:id="webViewContainer" styleClass="reader-pages" StackPane.alignment="CENTER" maxWidth="Infinity" maxHeight="Infinity"/>
 
-            <!-- Previous spread / chapter -->
+            <!-- Prev page -->
             <Button fx:id="btnPrevPage" styleClass="reader-nav-btn reader-nav-left" onAction="#onPrevPage" StackPane.alignment="CENTER_LEFT">
                 <graphic>
                     <FontIcon iconLiteral="fas-chevron-left" iconSize="20"/>
                 </graphic>
             </Button>
 
-            <!-- Next spread / chapter -->
+            <!-- Next page -->
             <Button fx:id="btnNextPage" styleClass="reader-nav-btn reader-nav-right" onAction="#onNextPage" StackPane.alignment="CENTER_RIGHT">
                 <graphic>
                     <FontIcon iconLiteral="fas-chevron-right" iconSize="20"/>
@@ -153,8 +150,6 @@
 
     <!-- ══════════════════════════════════════════════════════════════════════
          BOTTOM STATUS BAR
-         Left: Book › Chapter   spread N/Total
-         Right: X.X%
          ══════════════════════════════════════════════════════════════════════ -->
     <bottom>
         <HBox styleClass="reader-statusbar" alignment="CENTER_LEFT">
