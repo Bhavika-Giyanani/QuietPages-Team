@@ -5,42 +5,35 @@
 <?import org.kordamp.ikonli.javafx.FontIcon?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21"
-    xmlns:fx="http://javafx.com/fxml/1"
-    fx:controller="com.quietpages.quietpages.HelloController"
-    fx:id="rootPane"
-    styleClass="root-pane">
+    xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.quietpages.quietpages.HelloController" fx:id="rootPane" styleClass="root-pane">
 
     <!-- ── TOP BAR ───────────────────────────────────────── -->
     <top>
-      <StackPane>
+        <StackPane>
 
-        <!-- Background bar -->
-          <HBox styleClass="top-bar">
+            <!-- Background bar -->
+            <HBox styleClass="top-bar">
 
-            <!-- Left: menu -->
-            <Button fx:id="btnMenuToggle"
-                    styleClass="nav-btn top-menu-btn"
-                    onAction="#onMenuToggle">
-                <graphic>
-                    <FontIcon iconLiteral="fas-bars" iconSize="18"/>
-                </graphic>
-            </Button>
+                <!-- Left: menu -->
+                <Button fx:id="btnMenuToggle" styleClass="nav-btn top-menu-btn" onAction="#onMenuToggle">
+                    <graphic>
+                        <FontIcon iconLiteral="fas-bars" iconSize="18"/>
+                    </graphic>
+                </Button>
 
-            <Region HBox.hgrow="ALWAYS"/>
+                <Region HBox.hgrow="ALWAYS"/>
 
-            <!-- Right: plus -->
-            <Button fx:id="btnAdd"
-                    styleClass="nav-btn top-add-btn"
-                    onAction="#onOnlineBooks">
-                <graphic>
-                    <FontIcon iconLiteral="fas-plus" iconSize="18"/>
-                </graphic>
-            </Button>
+                <!-- Right: plus -->
+                <Button fx:id="btnAdd" styleClass="nav-btn top-add-btn" onAction="#onOnlineBooks">
+                    <graphic>
+                        <FontIcon iconLiteral="fas-plus" iconSize="18"/>
+                    </graphic>
+                </Button>
 
-        </HBox>
+            </HBox>
 
-        <!-- CENTER TITLE (true center, independent of buttons) -->
-        <Label text="QuietPages" styleClass="app-title" StackPane.alignment="CENTER"/>
+            <!-- CENTER TITLE (true center, independent of buttons) -->
+            <Label text="QuietPages" styleClass="app-title" StackPane.alignment="CENTER"/>
 
         </StackPane>
     </top>
@@ -50,25 +43,33 @@
 
 
             <Button fx:id="btnHome" styleClass="nav-btn" onAction="#onHome">
-                <graphic><FontIcon iconLiteral="fas-home" iconSize="20"/></graphic>
+                <graphic>
+                    <FontIcon iconLiteral="fas-home" iconSize="20"/>
+                </graphic>
             </Button>
 
             <Button fx:id="btnLibrary" styleClass="nav-btn" onAction="#onLibrary">
-                <graphic><FontIcon iconLiteral="fas-book" iconSize="20"/></graphic>
+                <graphic>
+                    <FontIcon iconLiteral="fas-book" iconSize="20"/>
+                </graphic>
             </Button>
 
-            <Button fx:id="btnCollections" styleClass="nav-btn" onAction="#onCollections">
+            <!-- <Button fx:id="btnCollections" styleClass="nav-btn" onAction="#onCollections">
                 <graphic><FontIcon iconLiteral="fas-list" iconSize="20"/></graphic>
-            </Button>
+            </Button> -->
 
             <Button fx:id="btnOnlineBooks" styleClass="nav-btn" onAction="#onOnlineBooks">
-                <graphic><FontIcon iconLiteral="fas-globe" iconSize="20"/></graphic>
+                <graphic>
+                    <FontIcon iconLiteral="fas-globe" iconSize="20"/>
+                </graphic>
             </Button>
 
             <Region VBox.vgrow="ALWAYS"/>
 
             <Button fx:id="btnSettings" styleClass="nav-btn" onAction="#onSettings">
-                <graphic><FontIcon iconLiteral="fas-cog" iconSize="20"/></graphic>
+                <graphic>
+                    <FontIcon iconLiteral="fas-cog" iconSize="20"/>
+                </graphic>
             </Button>
 
         </VBox>

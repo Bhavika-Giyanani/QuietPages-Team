@@ -44,24 +44,24 @@
             <!-- ── RIGHT SIDE ── -->
 
             <!-- Highlights (future) -->
-            <Button fx:id="btnHighlights" styleClass="reader-toolbar-btn" disable="true">
+            <!-- <Button fx:id="btnHighlights" styleClass="reader-toolbar-btn" disable="true">
                 <graphic>
                     <FontIcon iconLiteral="fas-highlighter" iconSize="15"/>
                 </graphic>
                 <tooltip>
                     <Tooltip text="Highlights (coming soon)"/>
                 </tooltip>
-            </Button>
+            </Button> -->
 
             <!-- Bookmarks (future) -->
-            <Button fx:id="btnBookmarks" styleClass="reader-toolbar-btn" disable="true">
+            <!-- <Button fx:id="btnBookmarks" styleClass="reader-toolbar-btn" disable="true">
                 <graphic>
                     <FontIcon iconLiteral="fas-bookmark" iconSize="15"/>
                 </graphic>
                 <tooltip>
                     <Tooltip text="Bookmarks (coming soon)"/>
                 </tooltip>
-            </Button>
+            </Button> -->
 
             <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
@@ -76,14 +76,14 @@
             </Button>
 
             <!-- Read Aloud (future) -->
-            <Button fx:id="btnReadAloud" styleClass="reader-toolbar-btn" disable="true">
+            <!-- <Button fx:id="btnReadAloud" styleClass="reader-toolbar-btn" disable="true">
                 <graphic>
                     <FontIcon iconLiteral="fas-volume-up" iconSize="15"/>
                 </graphic>
                 <tooltip>
                     <Tooltip text="Read Aloud (coming soon)"/>
                 </tooltip>
-            </Button>
+            </Button> -->
 
             <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
@@ -96,6 +96,7 @@
                     <Tooltip text="Text Style"/>
                 </tooltip>
             </Button>
+            <Separator orientation="VERTICAL" styleClass="reader-toolbar-sep"/>
 
             <!-- Reader Theme -->
             <Button fx:id="btnTheme" styleClass="reader-toolbar-btn" onAction="#onTheme">

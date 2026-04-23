@@ -24,7 +24,6 @@ import javafx.stage.Stage;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +38,10 @@ import java.util.stream.Collectors;
  * - Multi-select: checkboxes, select all, delete selected
  */
 public class LibraryController {
+
+    public void setOnOpenBook(java.util.function.Consumer<Book> callback) {
+        this.onOpenBook = callback;
+    }
 
     // ── FXML injections ───────────────────────────────────────────────────────
     @FXML
@@ -133,12 +136,8 @@ public class LibraryController {
     // Currently selected book for Info panel
     private Book selectedBook = null;
 
-    // Callback set by HelloController so opening a book launches the reader
-    private Consumer<Book> onOpenBook;
-
-    public void setOnOpenBook(Consumer<Book> callback) {
-        this.onOpenBook = callback;
-    }
+    // Callback to open the reader — set by HelloController
+    private java.util.function.Consumer<Book> onOpenBook;
 
     // ── Init ──────────────────────────────────────────────────────────────────
     @FXML
@@ -471,13 +470,10 @@ public class LibraryController {
         if (ids.isEmpty())
             return;
 
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Remove Books");
-        alert.setHeaderText("Remove " + ids.size() + " book(s)?");
-        alert.setContentText("This removes them from your library but does not delete the files.");
-        alert.getDialogPane().getStylesheets().add(
-                Objects.requireNonNull(getClass().getResource(
-                        "/com/quietpages/quietpages/library.css")).toExternalForm());
+        Alert alert = createStyledAlert(
+                "Remove Books",
+                "Remove " + ids.size() + " book(s)?",
+                "This removes them from your library but does not delete the files.");
 
         Optional<ButtonType> result = alert.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
@@ -513,7 +509,10 @@ public class LibraryController {
         info.setOnAction(e -> showBookInfo(book));
         edit.setOnAction(e -> showEditBookInfo(book, ctrl));
         remove.setOnAction(e -> removeBook(book));
-        pin.setOnAction(e -> service.togglePinned(book));
+        pin.setOnAction(e -> {
+            service.togglePinned(book);
+            loadBooks();
+        });
 
         menu.getItems().addAll(open, fav, info, edit, remove, pin);
         menu.show(card, screenX, screenY);
@@ -647,7 +646,23 @@ public class LibraryController {
         return lbl;
     }
 
-    // ── Styled alert helper ───────────────────────────────────────────────────
+    private void showNotification(String message) {
+        // Simple tooltip-style notification — can be upgraded with ControlsFX
+        // Notifications
+        Platform.runLater(() -> {
+            Tooltip tip = new Tooltip(message);
+            tip.setAutoHide(true);
+            tip.show(btnAdd.getScene().getWindow(),
+                    btnAdd.localToScreen(0, 0).getX(),
+                    btnAdd.localToScreen(0, 0).getY() + 30);
+            new java.util.Timer().schedule(new java.util.TimerTask() {
+                public void run() {
+                    Platform.runLater(tip::hide);
+                }
+            }, 2000);
+        });
+    }
+
     private Alert createStyledAlert(String title, String header, String content) {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle(title);
@@ -689,22 +704,5 @@ public class LibraryController {
         }
 
         return alert;
-    }
-
-    private void showNotification(String message) {
-        // Simple tooltip-style notification — can be upgraded with ControlsFX
-        // Notifications
-        Platform.runLater(() -> {
-            Tooltip tip = new Tooltip(message);
-            tip.setAutoHide(true);
-            tip.show(btnAdd.getScene().getWindow(),
-                    btnAdd.localToScreen(0, 0).getX(),
-                    btnAdd.localToScreen(0, 0).getY() + 30);
-            new java.util.Timer().schedule(new java.util.TimerTask() {
-                public void run() {
-                    Platform.runLater(tip::hide);
-                }
-            }, 2000);
-        });
     }
 }

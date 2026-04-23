@@ -37,14 +37,18 @@ public class LibraryService {
         return FXCollections.observableArrayList(dao.findAll());
     }
 
+    /**
+     * Returns a filtered list of books based on the selected FilterOption.
+     *
+     */
     public ObservableList<Book> getFilteredBooks(FilterOption filter) {
         List<Book> books = switch (filter) {
             case ALL -> dao.findAll();
             case FAVOURITES -> dao.findFavourites();
-            case DOWNLOADS -> dao.findDownloads();
+            // case DOWNLOADS -> dao.findByStatus(Book.ReadingStatus.DOWNLOADED);
             case READING -> dao.findByStatus(Book.ReadingStatus.READING);
             case NOT_STARTED -> dao.findByStatus(Book.ReadingStatus.NOT_STARTED);
-            case COMPLETED -> dao.findByStatus(Book.ReadingStatus.COMPLETED);
+            // case COMPLETED -> dao.findByStatus(Book.ReadingStatus.COMPLETED);
         };
         return FXCollections.observableArrayList(books);
     }
@@ -65,7 +69,9 @@ public class LibraryService {
                     Comparator.nullsLast(Comparator.reverseOrder()));
             case READING_PROGRESS -> Comparator.comparingDouble(Book::getReadingProgress).reversed();
         };
-        books.sort(cmp);
+        // Pinned books always appear first, regardless of the active sort option
+        Comparator<Book> pinnedFirst = Comparator.comparing(Book::isPinnedToStart).reversed();
+        books.sort(pinnedFirst.thenComparing(cmp));
     }
 
     // ── Import ────────────────────────────────────────────────────────────────
@@ -153,10 +159,10 @@ public class LibraryService {
     public enum FilterOption {
         ALL("All Books"),
         FAVOURITES("Favourites"),
-        DOWNLOADS("Downloads"),
+        // DOWNLOADS("Downloads"),
         READING("Reading"),
-        NOT_STARTED("Not Started"),
-        COMPLETED("Completed");
+        NOT_STARTED("Not Started");
+        // COMPLETED("Completed");
 
         private final String label;
 
@@ -201,10 +207,10 @@ public class LibraryService {
 
         public String getGroupKey(Book book) {
             return switch (this) {
-                case AUTHOR -> book.getAuthor();
+                case AUTHOR -> book.getAuthor().isEmpty() ? "Unknown Author" : book.getAuthor();
                 case FILE_PATH -> {
                     String p = book.getFilePath();
-                    int idx = p.lastIndexOf(File.separatorChar);
+                    int idx = p.lastIndexOf(java.io.File.separatorChar);
                     yield idx >= 0 ? p.substring(0, idx) : p;
                 }
                 case FILE_TYPE -> book.getFileType().toUpperCase();

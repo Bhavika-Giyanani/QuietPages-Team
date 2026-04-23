@@ -5,71 +5,63 @@
 <?import javafx.geometry.Insets?>
 
 <ScrollPane xmlns="http://javafx.com/javafx/21"
-            xmlns:fx="http://javafx.com/fxml/1"
-            fx:controller="com.quietpages.quietpages.controller.HomeController"
-            fitToWidth="true"
-            fitToHeight="true"
-            hbarPolicy="NEVER"
-            styleClass="library-root book-scroll-pane">
+    xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.quietpages.quietpages.controller.HomeController" fitToWidth="true" fitToHeight="true" hbarPolicy="NEVER" styleClass="library-root book-scroll-pane">
 
     <content>
-        <VBox spacing="30"
-              styleClass="library-root"
-              fillWidth="true"
-              prefHeight="Infinity"
-              maxWidth="Infinity">
+        <VBox spacing="24" styleClass="library-root" fillWidth="true" prefHeight="Infinity" maxWidth="Infinity">
 
             <padding>
-                <Insets top="20" right="20" bottom="20" left="20"/>
+                <Insets top="24" right="24" bottom="24" left="24"/>
             </padding>
 
             <!-- ── RECENT READS HEADER ───────────────────────── -->
-            <HBox alignment="CENTER_LEFT">
-                <Label text="Recent Reads"
-                       styleClass="section-title"/>
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <!-- FIXED: was using inline style with hardcoded black color.
+                     Now uses .section-title class from library.css which resolves
+                     to -qp-text-primary (white/light in dark mode). -->
+                <Label text="Recent Reads" styleClass="section-title"/>
 
                 <Region HBox.hgrow="ALWAYS"/>
 
-                <Label text="Open Library >"
-                       onMouseClicked="#onOpenLibrary"
-                       styleClass="link-label"/>
+                <Label text="Open Library ›" onMouseClicked="#onOpenLibrary" styleClass="link-label"/>
             </HBox>
 
             <!-- ── RECENT BOOKS (HORIZONTAL SCROLL) ─────────── -->
-            <ScrollPane fitToHeight="true"
-                        hbarPolicy="AS_NEEDED"
-                        vbarPolicy="NEVER"
-                        style="-fx-background-color: transparent;">
-
+            <ScrollPane fitToHeight="true" hbarPolicy="AS_NEEDED" vbarPolicy="NEVER" styleClass="book-scroll-pane" style="-fx-background-color:transparent;-fx-border-color:transparent;">
                 <content>
-                    <HBox fx:id="recentBox" spacing="16"/>
+                    <HBox fx:id="recentBox" spacing="16">
+                        <padding>
+                            <Insets top="4" right="4" bottom="8" left="4"/>
+                        </padding>
+                    </HBox>
                 </content>
             </ScrollPane>
 
+            <!-- ── DIVIDER ───────────────────────────────────── -->
+            <Separator opacity="0.3"/>
+
             <!-- ── FAVOURITE HEADER ─────────────────────────── -->
-            <HBox alignment="CENTER_LEFT">
-                <Label text="Favourite Books"
-                       styleClass="section-title"/>
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <!-- FIXED: same as above -->
+                <Label text="Favourite Books" styleClass="section-title"/>
 
                 <Region HBox.hgrow="ALWAYS"/>
 
-                <Label text="See more >"
-                       onMouseClicked="#onSeeMore"
-                       styleClass="link-label"/>
+                <Label text="See more ›" onMouseClicked="#onSeeMore" styleClass="link-label"/>
             </HBox>
 
             <!-- ── FAVOURITE BOOKS (HORIZONTAL SCROLL) ─────── -->
-            <ScrollPane fitToHeight="true"
-                        hbarPolicy="AS_NEEDED"
-                        vbarPolicy="NEVER"
-                        style="-fx-background-color: transparent;">
-
+            <ScrollPane fitToHeight="true" hbarPolicy="AS_NEEDED" vbarPolicy="NEVER" styleClass="book-scroll-pane" style="-fx-background-color:transparent;-fx-border-color:transparent;">
                 <content>
-                    <HBox fx:id="favBox" spacing="16"/>
+                    <HBox fx:id="favBox" spacing="16">
+                        <padding>
+                            <Insets top="4" right="4" bottom="8" left="4"/>
+                        </padding>
+                    </HBox>
                 </content>
             </ScrollPane>
 
-            <!-- ── SPACER (IMPORTANT FOR FULL HEIGHT) ───────── -->
+            <!-- ── SPACER ───────────────────────────────────── -->
             <Region VBox.vgrow="ALWAYS"/>
 
         </VBox>
